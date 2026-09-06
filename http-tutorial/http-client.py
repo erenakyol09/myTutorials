@@ -1,16 +1,17 @@
 """
-PART 2 - HTTP Client with POST support (Mini Browser)
---------------------------------------------------------
-This client can now:
-  - send a GET request to view a page
-  - send a POST request to simulate submitting a form (login)
+PART 3 - HTTP Client controlling the simulated device (Mini Browser)
+-----------------------------------------------------------------------
+This client talks to the simulated embedded device server:
+  - view the control panel HTML
+  - turn the LED on/off via GET + query string
+  - read the raw JSON status
 
-Run part2_server.py in another terminal first, then run this:
-    python3 part2_client.py
+Run part3_server.py in another terminal first, then run this:
+    python3 part3_client.py
 """
 
 import http.client
-from urllib.parse import urlencode
+import json
 
 
 def send_get(path: str):
@@ -21,63 +22,37 @@ def send_get(path: str):
     response = conn.getresponse()
 
     print(f"Status: {response.status} {response.reason}")
-    print("Headers:")
-    for key, value in response.getheaders():
-        print(f"    {key}: {value}")
 
     body = response.read().decode("utf-8")
-    print("\nBody:")
-    print(body)
-
     conn.close()
-
-
-def send_post(path: str, form_data: dict):
-    conn = http.client.HTTPConnection("localhost", 8000)
-
-    # Turn {"username": "eren", "password": "1234"}
-    # into "username=eren&password=1234"
-    encoded_body = urlencode(form_data)
-
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Content-Length": str(len(encoded_body)),
-    }
-
-    print(f"\n>>> POST {path}")
-    print(f">>> Body: {encoded_body}\n")
-
-    conn.request("POST", path, body=encoded_body, headers=headers)
-    response = conn.getresponse()
-
-    print(f"Status: {response.status} {response.reason}")
-    print("Headers:")
-    for key, value in response.getheaders():
-        print(f"    {key}: {value}")
-
-    body = response.read().decode("utf-8")
-    print("\nBody:")
-    print(body)
-
-    conn.close()
+    return body
 
 
 if __name__ == "__main__":
-    print("Mini Browser - CLI version (Part 2)")
-    print("1) View the login page (GET)")
-    print("2) Submit the login form (POST)")
+    print("Mini Browser - CLI version (Part 3: Device Control)")
+    print("1) View control panel (GET /)")
+    print("2) Turn LED ON  (GET /led?state=on)")
+    print("3) Turn LED OFF (GET /led?state=off)")
+    print("4) View raw JSON status (GET /status)")
     print("q) Quit")
 
     while True:
-        choice = input("\nChoose an option (1/2/q): ")
+        choice = input("\nChoose an option (1/2/3/4/q): ")
 
         if choice == "q":
             break
         elif choice == "1":
-            send_get("/login")
+            print(send_get("/"))
         elif choice == "2":
-            username = input("Username: ")
-            password = input("Password: ")
-            send_post("/login", {"username": username, "password": password})
+            print(send_get("/led?state=on"))
+        elif choice == "3":
+            print(send_get("/led?state=off"))
+        elif choice == "4":
+            body = send_get("/status")
+            print("Raw body:", body)
+            # Parse the JSON so we can use it as a real Python dict
+            data = json.loads(body)
+            print("Parsed  :", data)
+            print("LED is currently:", data["led"])
         else:
             print("Invalid option, try again.")
