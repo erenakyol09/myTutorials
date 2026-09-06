@@ -1,38 +1,60 @@
 """
-PART 1 - Simple HTTP Client (Mini Browser)
--------------------------------------------
-This client uses the http.client module to send a GET request
-to the server and inspect the response in detail.
+PART 2 - HTTP Client with POST support (Mini Browser)
+--------------------------------------------------------
+This client can now:
+  - send a GET request to view a page
+  - send a POST request to simulate submitting a form (login)
 
-Run part1_server.py in another terminal first, then run this:
-    python3 part1_client.py
+Run part2_server.py in another terminal first, then run this:
+    python3 part2_client.py
 """
 
 import http.client
+from urllib.parse import urlencode
 
 
-def send_request(path: str):
-    # Connect to the server on localhost:8000
+def send_get(path: str):
     conn = http.client.HTTPConnection("localhost", 8000)
+    print(f"\n>>> GET {path}\n")
 
-    print(f"\n>>> Requesting GET {path}...\n")
-
-    # Send the GET request
     conn.request("GET", path)
-
-    # Get the response
     response = conn.getresponse()
 
-    # ---- Print the status line ----
-    print(f"Status code   : {response.status}")
-    print(f"Status message: {response.reason}")
-
-    # ---- Print the headers ----
-    print("Headers       :")
+    print(f"Status: {response.status} {response.reason}")
+    print("Headers:")
     for key, value in response.getheaders():
         print(f"    {key}: {value}")
 
-    # ---- Read and print the body ----
+    body = response.read().decode("utf-8")
+    print("\nBody:")
+    print(body)
+
+    conn.close()
+
+
+def send_post(path: str, form_data: dict):
+    conn = http.client.HTTPConnection("localhost", 8000)
+
+    # Turn {"username": "eren", "password": "1234"}
+    # into "username=eren&password=1234"
+    encoded_body = urlencode(form_data)
+
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": str(len(encoded_body)),
+    }
+
+    print(f"\n>>> POST {path}")
+    print(f">>> Body: {encoded_body}\n")
+
+    conn.request("POST", path, body=encoded_body, headers=headers)
+    response = conn.getresponse()
+
+    print(f"Status: {response.status} {response.reason}")
+    print("Headers:")
+    for key, value in response.getheaders():
+        print(f"    {key}: {value}")
+
     body = response.read().decode("utf-8")
     print("\nBody:")
     print(body)
@@ -41,11 +63,21 @@ def send_request(path: str):
 
 
 if __name__ == "__main__":
-    print("Mini Browser - CLI version")
+    print("Mini Browser - CLI version (Part 2)")
+    print("1) View the login page (GET)")
+    print("2) Submit the login form (POST)")
+    print("q) Quit")
+
     while True:
-        path = input("\nPath to visit (type 'q' to quit): ")
-        if path.lower() == "q":
+        choice = input("\nChoose an option (1/2/q): ")
+
+        if choice == "q":
             break
-        if not path.startswith("/"):
-            path = "/" + path
-        send_request(path)
+        elif choice == "1":
+            send_get("/login")
+        elif choice == "2":
+            username = input("Username: ")
+            password = input("Password: ")
+            send_post("/login", {"username": username, "password": password})
+        else:
+            print("Invalid option, try again.")
