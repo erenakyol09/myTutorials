@@ -15,11 +15,23 @@ Application::Application()
 
 void Application::init()
 {
-    led1_.on();
+    led1_.off();
     led2_.off();
-    led3_.on();
+    led3_.off();
 }
 
 void Application::run()
 {
+}
+
+void Application::setLed(bool on)
+{
+    if (on)
+    {
+        led2_.on();
+    }
+    else
+    {
+        led2_.off();
+    }
 }

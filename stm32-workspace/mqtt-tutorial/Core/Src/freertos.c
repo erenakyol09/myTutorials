@@ -28,6 +28,7 @@
 #include "lwip.h"
 #include "usbd_cdc_if.h"
 #include "MqttService.h"
+#include "ApplicationWrapper.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -128,6 +129,7 @@ void StartDefaultTask(void *argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
+  App_Init();
   mqttServiceInit();
 
   /* Infinite loop */
@@ -138,6 +140,7 @@ void StartDefaultTask(void *argument)
   {
     MX_LWIP_Process();
     mqttServiceProcess();
+    App_Run();
 
 #if USB_CDC_HEARTBEAT_ENABLED
     if (HAL_GetTick() - lastHeartbeatTick >= 1000)

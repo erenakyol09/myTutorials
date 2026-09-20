@@ -11,6 +11,7 @@ public:
 
     void init();
     void run();
+    void setLed(bool on);
 
 private:
     Stm32Gpio led1Gpio_;

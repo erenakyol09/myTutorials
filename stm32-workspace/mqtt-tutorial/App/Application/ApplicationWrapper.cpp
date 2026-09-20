@@ -16,4 +16,9 @@ void App_Run(void)
     application.run();
 }
 
+void App_SetLed(bool on)
+{
+    application.setLed(on);
+}
+
 }

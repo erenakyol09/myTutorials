@@ -45,7 +45,7 @@ The board's address is configured in STM32CubeMX under LWIP (DHCP disabled) and 
 | Topic | Direction | Payload |
 | --- | --- | --- |
 | `stm32/status` | board publishes every 5 s | `uptime=<seconds>s count=<n>` |
-| `stm32/cmd` | board subscribes | any text, logged over USB CDC |
+| `stm32/cmd` | board subscribes | `ledOn` / `ledOff` drive LD2; any other text is logged as an unknown command |
 
 ## Prerequisites
 
@@ -88,7 +88,7 @@ Two known regeneration pitfalls in this project:
 | --- | --- |
 | `App/Services/MqttService.c/.h` | MQTT client: connect, retry, subscribe, publish |
 | `App/Application`, `App/Components`, `App/Interfaces` | C++ application layer (LED abstraction) |
-| `Core/Src/freertos.c` | `defaultTask`: drives lwIP and the MQTT service |
+| `Core/Src/freertos.c` | `defaultTask`: drives lwIP, the MQTT service and `App_Init()` / `App_Run()` |
 | `Core/Src/main.c` | Entry point, clock and peripheral init |
 | `LWIP/App/lwip.c` | lwIP init, static IP, link status callback (logs over CDC) |
 | `LWIP/Target/ethernetif.c` | ETH HAL/MSP init, LAN8742 PHY glue |
@@ -227,14 +227,20 @@ stm32/status uptime=25s count=3
 Send a command to the board:
 
 ```bash
-mosquitto_pub -h 192.168.10.1 -t stm32/cmd -m "hello"
+mosquitto_pub -h 192.168.10.1 -t stm32/cmd -m "ledOn"
+mosquitto_pub -h 192.168.10.1 -t stm32/cmd -m "ledOff"
 ```
 
-The CDC terminal prints:
+LD2 (the blue user LED) follows the command, and the CDC terminal prints:
 
 ```text
-MQTT rx [stm32/cmd] hello
+MQTT rx [stm32/cmd] ledOn, LED on
+MQTT rx [stm32/cmd] ledOff, LED off
 ```
+
+Any other payload is reported as an unknown command. The command path runs through the C++
+application layer: `MqttService.c` calls `App_SetLed()` in `App/Application/ApplicationWrapper.cpp`,
+which forwards to `Application::setLed()` and the `Stm32Led` / `Stm32Gpio` abstractions.
 
 ## Troubleshooting
 

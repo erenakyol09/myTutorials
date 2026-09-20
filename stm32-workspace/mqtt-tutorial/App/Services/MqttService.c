@@ -1,6 +1,7 @@
 #include "MqttService.h"
 
 #include "main.h"
+#include "ApplicationWrapper.h"
 #include "lwip/apps/mqtt.h"
 #include "lwip/netif.h"
 #include "usbd_cdc_if.h"
@@ -13,6 +14,8 @@
 #define MQTT_CLIENT_ID          "stm32f767"
 #define MQTT_TOPIC_STATUS       "stm32/status"
 #define MQTT_TOPIC_COMMAND      "stm32/cmd"
+#define MQTT_COMMAND_LED_ON     "ledOn"
+#define MQTT_COMMAND_LED_OFF    "ledOff"
 #define MQTT_KEEP_ALIVE_SEC     60U
 #define MQTT_PUBLISH_PERIOD_MS  5000U
 #define MQTT_RETRY_PERIOD_MS    5000U
@@ -154,7 +157,20 @@ static void mqttIncomingDataCallback(void *arg, const u8_t *data, u16_t len, u8_
     (void)memcpy(payload, data, copyLength);
     payload[copyLength] = '\0';
 
-    mqttLog("MQTT rx [%s] %s\r\n", incomingTopic, payload);
+    if (strcmp(payload, MQTT_COMMAND_LED_ON) == 0)
+    {
+        App_SetLed(true);
+        mqttLog("MQTT rx [%s] %s, LED on\r\n", incomingTopic, payload);
+    }
+    else if (strcmp(payload, MQTT_COMMAND_LED_OFF) == 0)
+    {
+        App_SetLed(false);
+        mqttLog("MQTT rx [%s] %s, LED off\r\n", incomingTopic, payload);
+    }
+    else
+    {
+        mqttLog("MQTT rx [%s] %s, unknown command\r\n", incomingTopic, payload);
+    }
 }
 
 static void mqttSubscribeCallback(void *arg, err_t err)
