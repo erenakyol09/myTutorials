@@ -122,12 +122,11 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-  /* init code for USB_DEVICE (moved before LWIP for diagnostics: if Ethernet/PHY
-     init hangs in Error_Handler(), USB CDC still comes up so we can see output) */
-  MX_USB_DEVICE_Init();
-
   /* init code for LWIP */
   MX_LWIP_Init();
+
+  /* init code for USB_DEVICE */
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN StartDefaultTask */
   App_Init();
   mqttServiceInit();
