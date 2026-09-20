@@ -46,6 +46,22 @@ The board's address is configured in STM32CubeMX under LWIP (DHCP disabled) and 
 | --- | --- | --- |
 | `stm32/status` | board publishes every 5 s | `uptime=<seconds>s count=<n>` |
 | `stm32/cmd` | board subscribes | `ledOn` / `ledOff` drive LD2; any other text is logged as an unknown command |
+| `stm32/state` | board publishes on connect, broker publishes on loss | `online` / `offline`, retained |
+
+### Device presence
+
+`stm32/state` implements the standard MQTT presence pattern:
+
+- On a successful connect the board publishes a **retained** `online`.
+- The board registers a **Last Will and Testament** when it connects, so the *broker* publishes a
+  retained `offline` on its behalf if the connection drops without a clean disconnect.
+
+Because both messages are retained, a client that subscribes at any later time immediately learns
+the board's last known state instead of waiting for the next message.
+
+The will only fires on an ungraceful disconnect; a clean `mqtt_disconnect()` suppresses it. The
+broker declares the client dead after 1.5 x the keep-alive interval, which is 15 s here, so
+`offline` appears roughly 23 s after the cable is pulled.
 
 ## Prerequisites
 
@@ -241,6 +257,34 @@ MQTT rx [stm32/cmd] ledOff, LED off
 Any other payload is reported as an unknown command. The command path runs through the C++
 application layer: `MqttService.c` calls `App_SetLed()` in `App/Application/ApplicationWrapper.cpp`,
 which forwards to `Application::setLed()` and the `Stm32Led` / `Stm32Gpio` abstractions.
+
+### 7. Test device presence
+
+Subscribe to the state topic **over loopback**, not over `192.168.10.1`:
+
+```bash
+mosquitto_sub -h localhost -t stm32/state -v
+```
+
+This matters for this particular test. `192.168.10.1` only exists while the cable is plugged in, so
+a subscriber using that address loses its own connection to the broker at the exact moment the board
+does, and misses the will. Over loopback the subscriber stays connected no matter what the Ethernet
+interface does.
+
+The retained `online` message arrives immediately, even though the board published it earlier:
+
+```text
+stm32/state online
+```
+
+Now pull the Ethernet cable. After roughly 23 seconds (1.5 x the 15 s keep-alive) the broker gives
+up on the client and publishes the will on its behalf:
+
+```text
+stm32/state offline
+```
+
+Plugging the cable back in makes the board reconnect and publish `online` again.
 
 ## Troubleshooting
 

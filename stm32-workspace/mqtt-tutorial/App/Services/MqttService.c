@@ -14,9 +14,16 @@
 #define MQTT_CLIENT_ID          "stm32f767"
 #define MQTT_TOPIC_STATUS       "stm32/status"
 #define MQTT_TOPIC_COMMAND      "stm32/cmd"
+#define MQTT_TOPIC_STATE        "stm32/state"
 #define MQTT_COMMAND_LED_ON     "ledOn"
 #define MQTT_COMMAND_LED_OFF    "ledOff"
-#define MQTT_KEEP_ALIVE_SEC     60U
+#define MQTT_STATE_ONLINE       "online"
+#define MQTT_STATE_OFFLINE      "offline"
+
+/* The broker declares the client dead after 1.5 x keep alive and then publishes the will,
+   so this value also sets how quickly "offline" appears after the cable is pulled.
+   lwIP checks keep alive on a 5 second timer, so keep it a multiple of 5. */
+#define MQTT_KEEP_ALIVE_SEC     15U
 #define MQTT_PUBLISH_PERIOD_MS  5000U
 #define MQTT_RETRY_PERIOD_MS    5000U
 #define MQTT_PAYLOAD_MAX_LEN    64U
@@ -32,7 +39,11 @@ static char incomingTopic[MQTT_TOPIC_MAX_LEN];
 
 static const struct mqtt_connect_client_info_t mqttClientInfo = {
     .client_id = MQTT_CLIENT_ID,
-    .keep_alive = MQTT_KEEP_ALIVE_SEC
+    .keep_alive = MQTT_KEEP_ALIVE_SEC,
+    .will_topic = MQTT_TOPIC_STATE,
+    .will_msg = MQTT_STATE_OFFLINE,
+    .will_qos = 0,
+    .will_retain = 1
 };
 
 static void mqttLog(const char *format, ...);
@@ -194,6 +205,11 @@ static void mqttConnectionCallback(mqtt_client_t *client, void *arg, mqtt_connec
     if (status == MQTT_CONNECT_ACCEPTED)
     {
         mqttLog("MQTT connected to %s\r\n", MQTT_BROKER_IP);
+
+        /* Retained, so it overwrites the retained "offline" left behind by the will */
+        (void)mqtt_publish(client, MQTT_TOPIC_STATE, MQTT_STATE_ONLINE,
+                           (u16_t)strlen(MQTT_STATE_ONLINE), 0, 1, NULL, NULL);
+
         mqtt_set_inpub_callback(client, mqttIncomingPublishCallback, mqttIncomingDataCallback, NULL);
         (void)mqtt_sub_unsub(client, MQTT_TOPIC_COMMAND, 0, mqttSubscribeCallback, NULL, 1);
     }
