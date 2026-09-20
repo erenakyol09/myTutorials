@@ -123,13 +123,9 @@ not ship a flashing script.
 Edit `mqtt-tutorial.ioc` in STM32CubeMX and regenerate. Keep custom code inside
 `/* USER CODE BEGIN */` ... `/* USER CODE END */` blocks; everything outside them is overwritten.
 
-Two known regeneration pitfalls in this project:
-
-- CubeMX resets the LWIP static IP to its own default (`192.168.0.2`). Re-check the LWIP IPv4 address
-  field after regenerating.
-- The `MX_USB_DEVICE_Init()` / `MX_LWIP_Init()` call order in `StartDefaultTask` lives outside the
-  USER CODE blocks. USB init is deliberately placed first so the CDC log still comes up if Ethernet
-  initialization fails; CubeMX may reorder it.
+CubeMX resets the LWIP IPv4 address field to its own default on regeneration, but that value does
+not matter here: `App/Services/NetworkConfig.h` overrides the address from a USER CODE block in
+`LWIP/App/lwip.c`.
 
 ## Project layout
 
