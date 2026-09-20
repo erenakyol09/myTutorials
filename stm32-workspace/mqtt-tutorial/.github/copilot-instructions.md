@@ -1,4 +1,4 @@
-# Copilot Instructions for web-server-app
+# Copilot Instructions for mqtt-tutorial
 
 ## Project Overview
 This is a CMake-based STM32 firmware project targeting the Nucleo-F767ZI board. The codebase is organized for STM32CubeMX compatibility and VS Code development workflows.
@@ -9,7 +9,7 @@ This is a CMake-based STM32 firmware project targeting the Nucleo-F767ZI board. 
 - **cmake/**: Custom CMake toolchain and STM32CubeMX integration scripts.
 - **startup_stm32f767xx.s**: ARM Cortex-M startup assembly.
 - **STM32F767XX_FLASH.ld**: Linker script for memory mapping.
-- **web-server-app.ioc**: STM32CubeMX configuration file (regenerate code via CubeMX if changed).
+- **mqtt-tutorial.ioc**: STM32CubeMX configuration file (regenerate code via CubeMX if changed).
 
 ## Build & Debug Workflow
 - **Build**: Use CMake presets or Ninja. Build artifacts are in `build/Debug/`.

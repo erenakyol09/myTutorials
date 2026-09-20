@@ -1,4 +1,4 @@
-# web-server-app
+# mqtt-tutorial
 
 Short description
 This is a CMake-based STM32 firmware project targeting the Nucleo-F767ZI board. The project is organized for STM32CubeMX compatibility and VS Code workflows.
@@ -21,7 +21,7 @@ Flash / Debug
 - Use external tools (ST-Link, OpenOCD, etc.) to flash and debug the resulting ELF/BIN (not provided by this repo).
 
 Regenerate code after .ioc changes
-- Edit `web-server-app.ioc` in STM32CubeMX and regenerate code. Do not manually overwrite CubeMX-generated regions; use USER CODE blocks for custom code.
+- Edit `mqtt-tutorial.ioc` in STM32CubeMX and regenerate code. Do not manually overwrite CubeMX-generated regions; use USER CODE blocks for custom code.
 
 Project layout (important files)
 - Core/Inc, Core/Src        : Main application code (entry point: `main.c`)
@@ -29,7 +29,7 @@ Project layout (important files)
 - cmake/                   : Custom CMake toolchain and CubeMX integration
 - startup_stm32f767xx.s    : Cortex-M startup assembly
 - STM32F767XX_FLASH.ld     : Linker script
-- web-server-app.ioc: CubeMX configuration
+- mqtt-tutorial.ioc: CubeMX configuration
 
 Coding guidelines (summary)
 - English-only comments and ASCII characters
