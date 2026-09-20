@@ -3,6 +3,7 @@
 #include "main.h"
 #include "ApplicationWrapper.h"
 #include "NetworkConfig.h"
+#include "TemperatureSensor.h"
 #include "lwip/apps/mqtt.h"
 #include "lwip/netif.h"
 #include "usbd_cdc_if.h"
@@ -13,7 +14,7 @@
 
 #define MQTT_BROKER_IP          NETWORK_MQTT_BROKER_IP
 #define MQTT_CLIENT_ID          "stm32f767"
-#define MQTT_TOPIC_STATUS       "stm32/status"
+#define MQTT_TOPIC_TEMPERATURE  "stm32/temperature"
 #define MQTT_TOPIC_COMMAND      "stm32/cmd"
 #define MQTT_TOPIC_STATE        "stm32/state"
 #define MQTT_COMMAND_LED_ON     "ledOn"
@@ -35,7 +36,6 @@ static mqtt_client_t *mqttClient = NULL;
 static ip_addr_t brokerAddress;
 static uint32_t lastPublishTick = 0U;
 static uint32_t lastRetryTick = 0U;
-static uint32_t publishCounter = 0U;
 static char incomingTopic[MQTT_TOPIC_MAX_LEN];
 
 static const struct mqtt_connect_client_info_t mqttClientInfo = {
@@ -103,15 +103,29 @@ void mqttServiceProcess(void)
     if ((HAL_GetTick() - lastPublishTick) >= MQTT_PUBLISH_PERIOD_MS)
     {
         char payload[MQTT_PAYLOAD_MAX_LEN];
+        int32_t milliCelsius;
+        int32_t fraction;
         int length;
         err_t err;
 
         lastPublishTick = HAL_GetTick();
-        length = snprintf(payload, sizeof(payload), "uptime=%lus count=%lu",
-                          (unsigned long)(HAL_GetTick() / 1000U), (unsigned long)publishCounter);
-        publishCounter++;
 
-        err = mqtt_publish(mqttClient, MQTT_TOPIC_STATUS, payload, (u16_t)length, 0, 0, NULL, NULL);
+        if (!temperatureSensorRead(&milliCelsius))
+        {
+            mqttLog("Temperature read failed\r\n");
+            return;
+        }
+
+        fraction = milliCelsius % 1000;
+        if (fraction < 0)
+        {
+            fraction = -fraction;
+        }
+
+        length = snprintf(payload, sizeof(payload), "%ld.%01ld",
+                          (long)(milliCelsius / 1000), (long)(fraction / 100));
+
+        err = mqtt_publish(mqttClient, MQTT_TOPIC_TEMPERATURE, payload, (u16_t)length, 0, 0, NULL, NULL);
         if (err != ERR_OK)
         {
             mqttLog("MQTT publish failed (%d)\r\n", (int)err);

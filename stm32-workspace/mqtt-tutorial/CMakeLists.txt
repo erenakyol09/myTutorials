@@ -54,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Application/ApplicationWrapper.cpp
     # Services
     App/Services/MqttService.c
+    App/Services/TemperatureSensor.c
     # Platform
     Platform/STM32/GPIO/Stm32Gpio.cpp
 )

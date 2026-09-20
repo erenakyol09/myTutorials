@@ -1,8 +1,9 @@
 # mqtt-tutorial
 
-MQTT over Ethernet on a Nucleo-F767ZI board. The firmware brings up the Ethernet link with a static
-IP, connects to an MQTT broker running on the development machine, subscribes to a command topic and
-publishes a periodic status message. All diagnostics are logged over a USB CDC virtual COM port.
+MQTT over Ethernet on a Nucleo-F767ZI board. The firmware brings up the Ethernet link (DHCP or a
+static address, selectable at compile time), connects to an MQTT broker running on the development
+machine, publishes the MCU die temperature every five seconds and drives an LED from a command
+topic. All diagnostics are logged over a USB CDC virtual COM port.
 
 ## Stack
 
@@ -24,7 +25,7 @@ MQTT client. **Every lwIP and MQTT call must happen from that task** — there i
 | --- | --- |
 | CN1 (ST-LINK USB) | Power, flashing and debugging |
 | CN13 (USB OTG_FS) | USB CDC virtual COM port used for logging |
-| RJ45 | Direct Ethernet cable to the development machine (no router) |
+| RJ45 | Ethernet, either into a router (DHCP profile) or straight to the machine (static profile) |
 
 Both USB cables can stay connected at the same time.
 
@@ -59,9 +60,26 @@ ipconfig getifaddr en0
 
 | Topic | Direction | Payload |
 | --- | --- | --- |
-| `stm32/status` | board publishes every 5 s | `uptime=<seconds>s count=<n>` |
+| `stm32/temperature` | board publishes every 5 s | MCU internal temperature in degrees Celsius, e.g. `42.3` |
 | `stm32/cmd` | board subscribes | `ledOn` / `ledOff` drive LD2; any other text is logged as an unknown command |
 | `stm32/state` | board publishes on connect, broker publishes on loss | `online` / `offline`, retained |
+
+### Temperature
+
+The value published on `stm32/temperature` comes from the MCU's own die temperature sensor, wired
+internally to ADC1 channel 18 (`ADC_CHANNEL_TEMPSENSOR`). `App/Services/TemperatureSensor.c`
+converts the raw count using the factory calibration values stored in OTP, `TS_CAL1` (30 C) and
+`TS_CAL2` (110 C), both taken at 3.3 V.
+
+Two things to keep in mind:
+
+- The CubeMX sampling time is **480 cycles** on purpose. The sensor needs at least 10 us of
+  sampling; at the 24 MHz ADC clock (PCLK2 96 MHz divided by 4) that gives 20 us. A shorter
+  sampling time returns noise.
+- It measures the die, not the room, so it reads well above ambient.
+
+The temperature is formatted with integer arithmetic rather than `%f`, because the linker uses
+`nano.specs` without float printf support.
 
 ### Device presence
 
@@ -118,6 +136,8 @@ Two known regeneration pitfalls in this project:
 | Path | Contents |
 | --- | --- |
 | `App/Services/MqttService.c/.h` | MQTT client: connect, retry, subscribe, publish |
+| `App/Services/TemperatureSensor.c/.h` | MCU internal temperature sensor on ADC1 |
+| `App/Services/NetworkConfig.h` | DHCP / static profile switch and broker address |
 | `App/Application`, `App/Components`, `App/Interfaces` | C++ application layer (LED abstraction) |
 | `Core/Src/freertos.c` | `defaultTask`: drives lwIP, the MQTT service and `App_Init()` / `App_Run()` |
 | `Core/Src/main.c` | Entry point, clock and peripheral init |
@@ -265,11 +285,11 @@ MQTT subscribed to stm32/cmd
 Watch the board's status messages (one every 5 seconds):
 
 ```bash
-mosquitto_sub -h 192.168.10.1 -t stm32/status -v
+mosquitto_sub -h 192.168.10.1 -t stm32/temperature -v
 ```
 
 ```text
-stm32/status uptime=25s count=3
+stm32/temperature 42.3
 ```
 
 Send a command to the board:
