@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/eren.akyol/Desktop/myTutorials/stm32-workspace/mqtt-tutorial/Core/Src",
+      "program": "/Users/eren.akyol/Desktop/myTutorials/stm32-workspace/mqtt-tutorial/Core/Src/build/Debug/outDebug"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "mqtt-tutorial",
+			"path": "mqtt-tutorial"
+		},
+		{
+			"name": "STM32_VS_Code_Project",
+			"path": "STM32_VS_Code_Project"
+		},
+		{
+			"name": "web-server-app",
+			"path": "web-server-app"
+		}
+	],
+	"settings": {}
+}
