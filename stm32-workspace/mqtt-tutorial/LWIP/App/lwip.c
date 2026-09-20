@@ -28,7 +28,9 @@
 #include "ethernetif.h"
 
 /* USER CODE BEGIN 0 */
-
+#include "usbd_cdc_if.h"
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
 static void ethernet_link_status_updated(struct netif *netif);
@@ -166,11 +168,16 @@ static void ethernet_link_status_updated(struct netif *netif)
   if (netif_is_up(netif))
   {
 /* USER CODE BEGIN 5 */
+    char msg[64];
+    int len = snprintf(msg, sizeof(msg), "Link UP, IP: %s\r\n", ip4addr_ntoa(netif_ip4_addr(netif)));
+    CDC_Transmit_FS((uint8_t *)msg, (uint16_t)len);
 /* USER CODE END 5 */
   }
   else /* netif is down */
   {
 /* USER CODE BEGIN 6 */
+    const char msg[] = "Link DOWN\r\n";
+    CDC_Transmit_FS((uint8_t *)msg, sizeof(msg) - 1);
 /* USER CODE END 6 */
   }
 }

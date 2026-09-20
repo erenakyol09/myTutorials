@@ -25,7 +25,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "lwip.h"
+#include "usbd_cdc_if.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,7 +59,7 @@ const osThreadAttr_t defaultTask_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-
+static void USB_CDC_TestHeartbeat(void);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
@@ -115,22 +117,45 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
+  /* init code for USB_DEVICE (moved before LWIP for diagnostics: if Ethernet/PHY
+     init hangs in Error_Handler(), USB CDC still comes up so we can see output) */
+  MX_USB_DEVICE_Init();
+
   /* init code for LWIP */
   MX_LWIP_Init();
-
-  /* init code for USB_DEVICE */
-  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN StartDefaultTask */
   /* Infinite loop */
+  uint32_t lastHeartbeatTick = 0;
   for(;;)
   {
-    osDelay(1);
+    MX_LWIP_Process();
+
+    if (HAL_GetTick() - lastHeartbeatTick >= 1000)
+    {
+      lastHeartbeatTick = HAL_GetTick();
+      USB_CDC_TestHeartbeat();
+    }
+
+    osDelay(10);
   }
   /* USER CODE END StartDefaultTask */
 }
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+
+/**
+  * @brief  Sends an incrementing test message over USB CDC, used to verify
+  *         the virtual COM port is alive independently of the Ethernet link.
+  * @retval None
+  */
+static void USB_CDC_TestHeartbeat(void)
+{
+  static uint32_t counter = 0;
+  char msg[32];
+  int len = snprintf(msg, sizeof(msg), "USB CDC test #%lu\r\n", (unsigned long)counter++);
+  CDC_Transmit_FS((uint8_t *)msg, (uint16_t)len);
+}
 
 /* USER CODE END Application */
 
