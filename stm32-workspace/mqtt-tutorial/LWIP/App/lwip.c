@@ -28,6 +28,8 @@
 #include "ethernetif.h"
 
 /* USER CODE BEGIN 0 */
+#include "NetworkConfig.h"
+#include "lwip/dhcp.h"
 #include "usbd_cdc_if.h"
 #include <stdio.h>
 #include <string.h>
@@ -53,7 +55,18 @@ uint8_t NETMASK_ADDRESS[4];
 uint8_t GATEWAY_ADDRESS[4];
 
 /* USER CODE BEGIN 2 */
-
+/**
+  * @brief  Reports the current IPv4 address over USB CDC.
+  * @param  netif the network interface whose address changed
+  * @return None
+  * @note   Registered as the netif status callback, so with DHCP it fires once the lease arrives.
+  */
+static void networkAddressUpdated(struct netif *netif)
+{
+    char msg[48];
+    int len = snprintf(msg, sizeof(msg), "IP address: %s\r\n", ip4addr_ntoa(netif_ip4_addr(netif)));
+    CDC_Transmit_FS((uint8_t *)msg, (uint16_t)len);
+}
 /* USER CODE END 2 */
 
 /**
@@ -76,6 +89,19 @@ void MX_LWIP_Init(void)
   GATEWAY_ADDRESS[3] = 0;
 
 /* USER CODE BEGIN IP_ADDRESSES */
+  /* Override the CubeMX generated values, which are reset on every code generation */
+#if NETWORK_USE_DHCP
+  NETWORK_SET_ADDR(IP_ADDRESS, 0, 0, 0, 0);
+  NETWORK_SET_ADDR(NETMASK_ADDRESS, 0, 0, 0, 0);
+  NETWORK_SET_ADDR(GATEWAY_ADDRESS, 0, 0, 0, 0);
+#else
+  NETWORK_SET_ADDR(IP_ADDRESS, NETWORK_STATIC_IP_0, NETWORK_STATIC_IP_1,
+                   NETWORK_STATIC_IP_2, NETWORK_STATIC_IP_3);
+  NETWORK_SET_ADDR(NETMASK_ADDRESS, NETWORK_STATIC_NETMASK_0, NETWORK_STATIC_NETMASK_1,
+                   NETWORK_STATIC_NETMASK_2, NETWORK_STATIC_NETMASK_3);
+  NETWORK_SET_ADDR(GATEWAY_ADDRESS, NETWORK_STATIC_GATEWAY_0, NETWORK_STATIC_GATEWAY_1,
+                   NETWORK_STATIC_GATEWAY_2, NETWORK_STATIC_GATEWAY_3);
+#endif
 /* USER CODE END IP_ADDRESSES */
 
   /* Initialize the LwIP stack without RTOS */
@@ -99,7 +125,14 @@ void MX_LWIP_Init(void)
   netif_set_link_callback(&gnetif, ethernet_link_status_updated);
 
 /* USER CODE BEGIN 3 */
+  netif_set_status_callback(&gnetif, networkAddressUpdated);
 
+#if NETWORK_USE_DHCP
+  dhcp_start(&gnetif);
+#else
+  /* netif_set_up() already ran before the callback was registered, so report the address now */
+  networkAddressUpdated(&gnetif);
+#endif
 /* USER CODE END 3 */
 }
 
@@ -168,9 +201,10 @@ static void ethernet_link_status_updated(struct netif *netif)
   if (netif_is_up(netif))
   {
 /* USER CODE BEGIN 5 */
-    char msg[64];
-    int len = snprintf(msg, sizeof(msg), "Link UP, IP: %s\r\n", ip4addr_ntoa(netif_ip4_addr(netif)));
-    CDC_Transmit_FS((uint8_t *)msg, (uint16_t)len);
+    /* The address is reported separately by networkAddressUpdated(), because with DHCP it is not
+       known yet at this point */
+    const char msg[] = "Link UP\r\n";
+    CDC_Transmit_FS((uint8_t *)msg, sizeof(msg) - 1);
 /* USER CODE END 5 */
   }
   else /* netif is down */

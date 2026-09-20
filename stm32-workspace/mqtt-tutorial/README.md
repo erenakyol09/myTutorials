@@ -30,15 +30,30 @@ Both USB cables can stay connected at the same time.
 
 ## Network layout
 
-| Node | Address |
-| --- | --- |
-| STM32 | `192.168.10.2/24` |
-| Development machine | `192.168.10.1/24` |
-| Gateway | none (direct cable) |
-| Broker | `192.168.10.1:1883` |
+`App/Services/NetworkConfig.h` selects one of two profiles with a single switch:
 
-The board's address is configured in STM32CubeMX under LWIP (DHCP disabled) and ends up in
-`LWIP/App/lwip.c`. The broker address is defined in `App/Services/MqttService.c`.
+```c
+#define NETWORK_USE_DHCP 1
+```
+
+| | `NETWORK_USE_DHCP 1` | `NETWORK_USE_DHCP 0` |
+| --- | --- | --- |
+| Wiring | board plugged into a router or switch | board cabled directly to the machine |
+| STM32 address | leased from the DHCP server | `192.168.10.2/24`, no gateway |
+| Machine address | its normal LAN address | `192.168.10.1/24`, set manually |
+| Broker | LAN address of the machine running Mosquitto | `192.168.10.1:1883` |
+
+The header is included from both `LWIP/Target/lwipopts.h` (where it turns `LWIP_DHCP` on) and
+`LWIP/App/lwip.c` (where it either starts the DHCP client or applies the static address), so the one
+switch reconfigures the stack and the application together. Everything lives in `USER CODE` blocks,
+so it survives CubeMX regeneration — including the static address, which CubeMX would otherwise reset
+to its own default.
+
+When using DHCP, set `NETWORK_MQTT_BROKER_IP` to the LAN address of the machine running the broker:
+
+```bash
+ipconfig getifaddr en0
+```
 
 ## MQTT topics
 
@@ -139,7 +154,12 @@ screen /dev/cu.usbmodemXXXX 115200
 
 To exit `screen`: `Ctrl-A`, then `K`, then `y`.
 
-### 2. Give the development machine a static IP
+### 2. Set up addressing
+
+**With DHCP (`NETWORK_USE_DHCP 1`)**: plug the board into the router, nothing to configure on the
+machine. Set `NETWORK_MQTT_BROKER_IP` to the machine's LAN address.
+
+**With a static address (`NETWORK_USE_DHCP 0`)**: configure the adapter manually.
 
 ```bash
 networksetup -listallhardwareports
@@ -150,15 +170,26 @@ Replace `USB 10/100 LAN` with the adapter name from the first command. GUI alter
 System Settings → Network → select the adapter → Details → TCP/IP → Configure IPv4: Manually →
 IP `192.168.10.1`, Subnet Mask `255.255.255.0`, Router empty.
 
+If the adapter ends up above Wi-Fi in the service order, or keeps a stale router entry, macOS makes
+it the primary service while its gateway is unreachable and general internet access breaks. Keep
+Wi-Fi first:
+
+```bash
+sudo networksetup -ordernetworkservices "Wi-Fi" "USB 10/100 LAN" "Thunderbolt Bridge" "iPhone USB" "VPN"
+```
+
 ### 3. Verify the Ethernet link
 
 With `screen` open, plug in the Ethernet cable (or reset the board while it is plugged in):
 
 ```text
-Link UP, IP: 192.168.10.2
+Link UP
+IP address: 192.168.10.2
 ```
 
-Unplugging prints `Link DOWN`. Then verify IP connectivity:
+The two messages come from different callbacks: the link callback reports the cable, and the netif
+status callback reports the address, which with DHCP only arrives once the lease is granted.
+Unplugging prints `Link DOWN`. Then verify IP connectivity, using whichever address was reported:
 
 ```bash
 ping 192.168.10.2
@@ -225,7 +256,8 @@ mosquitto_pub -h localhost -t test/topic -n -r
 Flash the firmware and watch the CDC terminal. Expected sequence:
 
 ```text
-Link UP, IP: 192.168.10.2
+Link UP
+IP address: 192.168.10.2
 MQTT connected to 192.168.10.1
 MQTT subscribed to stm32/cmd
 ```

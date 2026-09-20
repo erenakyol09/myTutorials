@@ -2,6 +2,7 @@
 
 #include "main.h"
 #include "ApplicationWrapper.h"
+#include "NetworkConfig.h"
 #include "lwip/apps/mqtt.h"
 #include "lwip/netif.h"
 #include "usbd_cdc_if.h"
@@ -10,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MQTT_BROKER_IP          "192.168.10.1"
+#define MQTT_BROKER_IP          NETWORK_MQTT_BROKER_IP
 #define MQTT_CLIENT_ID          "stm32f767"
 #define MQTT_TOPIC_STATUS       "stm32/status"
 #define MQTT_TOPIC_COMMAND      "stm32/cmd"
@@ -73,7 +74,11 @@ void mqttServiceInit(void)
 
 void mqttServiceProcess(void)
 {
-    if ((mqttClient == NULL) || (netif_default == NULL) || (netif_is_link_up(netif_default) == 0))
+    /* With DHCP the link comes up before an address is leased, so connecting is only possible
+       once the interface actually has one */
+    if ((mqttClient == NULL) || (netif_default == NULL) ||
+        (netif_is_link_up(netif_default) == 0) ||
+        ip4_addr_isany_val(*netif_ip4_addr(netif_default)))
     {
         return;
     }
