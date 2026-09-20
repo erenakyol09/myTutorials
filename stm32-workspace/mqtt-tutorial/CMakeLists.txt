@@ -49,6 +49,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Application/Application.cpp
     App/Components/Stm32Led.cpp
     App/Application/ApplicationWrapper.cpp
+    # Services
+    App/Services/MqttService.c
     # Platform
     Platform/STM32/GPIO/Stm32Gpio.cpp
 )
@@ -59,6 +61,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/Interfaces
     App/Application
     App/Components
+    App/Services
 
     Platform/STM32/GPIO
 )
