@@ -130,11 +130,13 @@ void StartDefaultTask(void *argument)
   {
     MX_LWIP_Process();
 
+    /*
     if (HAL_GetTick() - lastHeartbeatTick >= 1000)
     {
       lastHeartbeatTick = HAL_GetTick();
       USB_CDC_TestHeartbeat();
     }
+    */
 
     osDelay(10);
   }
