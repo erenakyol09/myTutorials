@@ -36,7 +36,7 @@
   * assigned to the USB Ethernet adapter.
   */
 #if NETWORK_USE_DHCP
-#define NETWORK_MQTT_BROKER_IP "192.168.1.103"
+#define NETWORK_MQTT_BROKER_IP "192.168.1.107"
 #else
 #define NETWORK_MQTT_BROKER_IP "192.168.10.1"
 #endif
