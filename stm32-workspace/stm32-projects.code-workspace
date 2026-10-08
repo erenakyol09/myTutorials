@@ -1,6 +1,10 @@
 {
 	"folders": [
 		{
+			"name": "edge-ai-tutorial",
+			"path": "edge-ai-tutorial"
+		},
+		{
 			"name": "mqtt-tutorial",
 			"path": "mqtt-tutorial"
 		},
