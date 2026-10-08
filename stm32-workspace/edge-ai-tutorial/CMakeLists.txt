@@ -53,6 +53,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Components/Stm32Led.cpp
     App/Application/ApplicationWrapper.cpp
     # Services
+    App/Services/Adxl345.c
     App/Services/MqttService.c
     App/Services/TemperatureSensor.c
     # Platform
