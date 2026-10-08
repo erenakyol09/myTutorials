@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADXL345 Viewer</title>
+<!--
+  Live viewer and recorder for the "x,y,z" milli-g CSV stream the firmware sends over USB CDC.
+  Needs the Web Serial API: open this file in Chrome or Edge.
+  Append ?demo to the URL to run on synthetic data without a board.
+-->
+<style>
+:root {
+    color-scheme: light;
+    --page: #f4f4f2;
+    --surface: #fcfcfb;
+    --border: #dddcd6;
+    --grid: #e6e5e0;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #85847d;
+    --series-x: #2a78d6;
+    --series-y: #eb6834;
+    --series-z: #1baf7a;
+    --accent: #2a78d6;
+    --recording: #e34948;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        color-scheme: dark;
+        --page: #111110;
+        --surface: #1a1a19;
+        --border: #34342f;
+        --grid: #2a2a27;
+        --text-primary: #ffffff;
+        --text-secondary: #c3c2b7;
+        --text-muted: #8b8a82;
+        --series-x: #3987e5;
+        --series-y: #d95926;
+        --series-z: #199e70;
+        --accent: #3987e5;
+        --recording: #e66767;
+    }
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    padding: 16px;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main { max-width: 1100px; margin: 0 auto; display: grid; gap: 12px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+h1 { font-size: 18px; margin: 0 auto 0 0; }
+.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+}
+.panel h2 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+button, select, input[type="text"] {
+    font: inherit;
+    color: var(--text-primary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+}
+button { cursor: pointer; }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+button.recording { background: var(--recording); border-color: var(--recording); color: #ffffff; }
+#status { color: var(--text-secondary); min-width: 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+.tile .label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .unit { font-size: 12px; font-weight: 400; color: var(--text-muted); margin-left: 4px; }
+.swatch { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; }
+@media (max-width: 760px) { .row { grid-template-columns: minmax(0, 1fr); } }
+.chart-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; }
+.chart-head h2 { margin: 0 auto 0 0; }
+.legend { display: flex; gap: 12px; color: var(--text-secondary); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.plot { position: relative; height: 340px; }
+.plot canvas, .level canvas { width: 100%; height: 100%; display: block; }
+.level { height: 236px; }
+#tooltip {
+    position: absolute;
+    pointer-events: none;
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+#tooltip div { display: flex; align-items: center; gap: 6px; }
+#tooltip .time { color: var(--text-muted); }
+.angles { display: flex; justify-content: space-around; color: var(--text-secondary); font-size: 12px; }
+.angles b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.record { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.record input { width: 180px; }
+#recordInfo { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+    <header>
+        <h1>ADXL345 Viewer</h1>
+        <span id="status">Not connected</span>
+        <button id="pauseButton" disabled>Pause</button>
+        <button id="connectButton" class="primary">Connect</button>
+    </header>
+
+    <section class="tiles">
+        <div class="panel tile">
+            <div class="label"><span class="swatch" style="background: var(--series-x)"></span>X</div>
+            <div class="value"><span id="valueX">--</span><span class="unit">mg</span></div>
+        </div>
+        <div class="panel tile">
+            <div class="label"><span class="swatch" style="background: var(--series-y)"></span>Y</div>
+            <div class="value"><span id="valueY">--</span><span class="unit">mg</span></div>
+        </div>
+        <div class="panel tile">
+            <div class="label"><span class="swatch" style="background: var(--series-z)"></span>Z</div>
+            <div class="value"><span id="valueZ">--</span><span class="unit">mg</span></div>
+        </div>
+        <div class="panel tile">
+            <div class="label">Magnitude</div>
+            <div class="value"><span id="valueMagnitude">--</span><span class="unit">mg</span></div>
+        </div>
+        <div class="panel tile">
+            <div class="label">Sample rate</div>
+            <div class="value"><span id="valueRate">--</span><span class="unit">Hz</span></div>
+        </div>
+    </section>
+
+    <section class="row">
+        <div class="panel">
+            <div class="chart-head">
+                <h2>Acceleration (mg)</h2>
+                <div class="legend">
+                    <span><span class="swatch" style="background: var(--series-x)"></span>X</span>
+                    <span><span class="swatch" style="background: var(--series-y)"></span>Y</span>
+                    <span><span class="swatch" style="background: var(--series-z)"></span>Z</span>
+                </div>
+                <select id="windowSelect" aria-label="Time window">
+                    <option value="2">Last 2 s</option>
+                    <option value="5" selected>Last 5 s</option>
+                    <option value="10">Last 10 s</option>
+                    <option value="30">Last 30 s</option>
+                </select>
+            </div>
+            <div class="plot">
+                <canvas id="plotCanvas"></canvas>
+                <div id="tooltip"></div>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>Tilt</h2>
+            <div class="level"><canvas id="levelCanvas"></canvas></div>
+            <div class="angles">
+                <span>Pitch <b id="valuePitch">--</b> deg</span>
+                <span>Roll <b id="valueRoll">--</b> deg</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>Record to CSV</h2>
+        <div class="record">
+            <label for="labelInput">Label</label>
+            <input type="text" id="labelInput" value="idle" spellcheck="false">
+            <button id="recordButton" disabled>Start recording</button>
+            <span id="recordInfo"></span>
+        </div>
+    </section>
+</main>
+
+<script>
+"use strict";
+
+const NOMINAL_RATE_HZ = 100;
+const BUFFER_SECONDS = 30;
+const BUFFER_SIZE = NOMINAL_RATE_HZ * BUFFER_SECONDS;
+const MIN_RANGE_MG = 2000;
+const GRID_STEP_MG = 1000;
+const SAMPLE_PATTERN = /^(-?\d+),(-?\d+),(-?\d+)$/;
+const AXES = ["x", "y", "z"];
+
+const elements = {
+    status: document.getElementById("status"),
+    connect: document.getElementById("connectButton"),
+    pause: document.getElementById("pauseButton"),
+    record: document.getElementById("recordButton"),
+    recordInfo: document.getElementById("recordInfo"),
+    label: document.getElementById("labelInput"),
+    windowSelect: document.getElementById("windowSelect"),
+    plot: document.getElementById("plotCanvas"),
+    level: document.getElementById("levelCanvas"),
+    tooltip: document.getElementById("tooltip"),
+    x: document.getElementById("valueX"),
+    y: document.getElementById("valueY"),
+    z: document.getElementById("valueZ"),
+    magnitude: document.getElementById("valueMagnitude"),
+    rate: document.getElementById("valueRate"),
+    pitch: document.getElementById("valuePitch"),
+    roll: document.getElementById("valueRoll")
+};
+
+/* Ring buffer of the most recent samples, one typed array per axis */
+const samples = {
+    x: new Int16Array(BUFFER_SIZE),
+    y: new Int16Array(BUFFER_SIZE),
+    z: new Int16Array(BUFFER_SIZE),
+    head: 0,
+    count: 0
+};
+
+const state = {
+    port: null,
+    reader: null,
+    connected: false,
+    paused: false,
+    recording: null,
+    rateWindowStart: performance.now(),
+    rateWindowCount: 0,
+    hoverX: null,
+    dirty: true
+};
+
+function pushSample(x, y, z) {
+    state.rateWindowCount += 1;
+
+    if (state.recording !== null) {
+        state.recording.rows.push(x + "," + y + "," + z);
+    }
+
+    if (state.paused) {
+        return;
+    }
+
+    samples.x[samples.head] = x;
+    samples.y[samples.head] = y;
+    samples.z[samples.head] = z;
+    samples.head = (samples.head + 1) % BUFFER_SIZE;
+    samples.count = Math.min(samples.count + 1, BUFFER_SIZE);
+    state.dirty = true;
+}
+
+/* Returns the sample that is `age` samples old, 0 being the newest */
+function sampleAt(age) {
+    const index = (samples.head - 1 - age + 2 * BUFFER_SIZE) % BUFFER_SIZE;
+    return { x: samples.x[index], y: samples.y[index], z: samples.z[index] };
+}
+
+function handleLine(line) {
+    const text = line.trim();
+    const match = SAMPLE_PATTERN.exec(text);
+
+    if (match !== null) {
+        pushSample(Number(match[1]), Number(match[2]), Number(match[3]));
+    } else if (text.startsWith("#")) {
+        elements.status.textContent = text.slice(1).trim();
+    }
+    /* Anything else is an unrelated firmware log line */
+}
+
+async function connect() {
+    if (!("serial" in navigator)) {
+        elements.status.textContent = "Web Serial is not available. Use Chrome or Edge.";
+        return;
+    }
+
+    try {
+        state.port = await navigator.serial.requestPort();
+        /* The baud rate is ignored by USB CDC but the API requires one */
+        await state.port.open({ baudRate: 115200 });
+    } catch (error) {
+        elements.status.textContent = "Could not open port: " + error.message;
+        state.port = null;
+        return;
+    }
+
+    setConnected(true);
+    readLoop();
+}
+
+async function readLoop() {
+    const decoder = new TextDecoder();
+    let pending = "";
+
+    state.reader = state.port.readable.getReader();
+
+    try {
+        for (;;) {
+            const result = await state.reader.read();
+            if (result.done) {
+                break;
+            }
+
+            pending += decoder.decode(result.value, { stream: true });
+            const lines = pending.split("\n");
+            pending = lines.pop();
+            lines.forEach(handleLine);
+        }
+    } catch (error) {
+        elements.status.textContent = "Connection lost: " + error.message;
+    } finally {
+        state.reader.releaseLock();
+        state.reader = null;
+        try {
+            await state.port.close();
+        } catch (error) {
+            /* Already gone when the board was unplugged */
+        }
+        state.port = null;
+        setConnected(false);
+    }
+}
+
+async function disconnect() {
+    if (state.reader !== null) {
+        await state.reader.cancel();
+    }
+}
+
+function setConnected(connected) {
+    state.connected = connected;
+    elements.connect.textContent = connected ? "Disconnect" : "Connect";
+    elements.connect.classList.toggle("primary", !connected);
+    elements.pause.disabled = !connected;
+    elements.record.disabled = !connected;
+
+    if (connected) {
+        elements.status.textContent = "Connected";
+    } else {
+        if (state.recording !== null) {
+            stopRecording();
+        }
+        if (elements.status.textContent === "Connected") {
+            elements.status.textContent = "Not connected";
+        }
+        elements.rate.textContent = "--";
+    }
+}
+
+function startRecording() {
+    state.recording = { rows: [], startedAt: performance.now() };
+    elements.record.textContent = "Stop and save";
+    elements.record.classList.add("recording");
+    elements.label.disabled = true;
+}
+
+function stopRecording() {
+    const recording = state.recording;
+    const label = elements.label.value.trim().replace(/[^A-Za-z0-9_-]+/g, "_") || "unlabeled";
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+
+    state.recording = null;
+    elements.record.textContent = "Start recording";
+    elements.record.classList.remove("recording");
+    elements.label.disabled = false;
+
+    if (recording.rows.length === 0) {
+        elements.recordInfo.textContent = "Nothing recorded";
+        return;
+    }
+
+    const blob = new Blob(["x_mg,y_mg,z_mg\n" + recording.rows.join("\n") + "\n"], { type: "text/csv" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = label + "_" + stamp + ".csv";
+    link.click();
+    URL.revokeObjectURL(link.href);
+
+    elements.recordInfo.textContent = "Saved " + recording.rows.length + " samples to " + link.download;
+}
+
+function cssColor(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/* Sizes the canvas backing store to its CSS box and returns a context scaled to CSS pixels */
+function prepareCanvas(canvas) {
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+
+    if ((canvas.width !== Math.round(width * ratio)) || (canvas.height !== Math.round(height * ratio))) {
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+    }
+
+    const context = canvas.getContext("2d");
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+
+    return { context: context, width: width, height: height };
+}
+
+function drawPlot() {
+    const canvas = prepareCanvas(elements.plot);
+    const context = canvas.context;
+    const margin = { left: 48, right: 12, top: 8, bottom: 24 };
+    const plotWidth = canvas.width - margin.left - margin.right;
+    const plotHeight = canvas.height - margin.top - margin.bottom;
+    const windowSeconds = Number(elements.windowSelect.value);
+    const windowSamples = windowSeconds * NOMINAL_RATE_HZ;
+    const visible = Math.min(samples.count, windowSamples);
+    const colors = { x: cssColor("--series-x"), y: cssColor("--series-y"), z: cssColor("--series-z") };
+    let range = MIN_RANGE_MG;
+
+    for (let age = 0; age < visible; age++) {
+        const sample = sampleAt(age);
+        range = Math.max(range, Math.abs(sample.x), Math.abs(sample.y), Math.abs(sample.z));
+    }
+    range = Math.ceil(range / GRID_STEP_MG) * GRID_STEP_MG;
+
+    const xOfAge = function (age) {
+        return margin.left + plotWidth - (age / windowSamples) * plotWidth;
+    };
+    const yOfValue = function (value) {
+        return margin.top + plotHeight / 2 - (value / range) * (plotHeight / 2);
+    };
+
+    context.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+    context.lineWidth = 1;
+
+    /* Horizontal grid with value labels, the zero line slightly stronger */
+    context.textAlign = "right";
+    context.textBaseline = "middle";
+    for (let value = -range; value <= range; value += GRID_STEP_MG) {
+        const y = Math.round(yOfValue(value)) + 0.5;
+        context.strokeStyle = (value === 0) ? cssColor("--border") : cssColor("--grid");
+        context.beginPath();
+        context.moveTo(margin.left, y);
+        context.lineTo(margin.left + plotWidth, y);
+        context.stroke();
+        context.fillStyle = cssColor("--text-muted");
+        context.fillText(String(value), margin.left - 8, y);
+    }
+
+    /* Time labels */
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    const timeStep = windowSeconds / 5;
+    for (let seconds = 0; seconds <= windowSeconds; seconds += timeStep) {
+        const label = (seconds === 0) ? "now" : "-" + seconds + " s";
+        context.fillText(label, xOfAge(seconds * NOMINAL_RATE_HZ), margin.top + plotHeight + 8);
+    }
+
+    context.save();
+    context.beginPath();
+    context.rect(margin.left, margin.top, plotWidth, plotHeight);
+    context.clip();
+    context.lineWidth = 2;
+    context.lineJoin = "round";
+    AXES.forEach(function (axis) {
+        context.strokeStyle = colors[axis];
+        context.beginPath();
+        for (let age = visible - 1; age >= 0; age--) {
+            const x = xOfAge(age);
+            const y = yOfValue(sampleAt(age)[axis]);
+            if (age === visible - 1) {
+                context.moveTo(x, y);
+            } else {
+                context.lineTo(x, y);
+            }
+        }
+        context.stroke();
+    });
+    context.restore();
+
+    drawHover(context, { margin: margin, plotWidth: plotWidth, plotHeight: plotHeight,
+                         windowSamples: windowSamples, visible: visible, colors: colors,
+                         xOfAge: xOfAge, yOfValue: yOfValue });
+}
+
+function drawHover(context, plot) {
+    const tooltip = elements.tooltip;
+
+    if ((state.hoverX === null) || (plot.visible === 0)) {
+        tooltip.style.display = "none";
+        return;
+    }
+
+    const fraction = (plot.margin.left + plot.plotWidth - state.hoverX) / plot.plotWidth;
+    const age = Math.round(fraction * plot.windowSamples);
+    if ((age < 0) || (age >= plot.visible)) {
+        tooltip.style.display = "none";
+        return;
+    }
+
+    const sample = sampleAt(age);
+    const x = plot.xOfAge(age);
+
+    context.strokeStyle = cssColor("--text-muted");
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(Math.round(x) + 0.5, plot.margin.top);
+    context.lineTo(Math.round(x) + 0.5, plot.margin.top + plot.plotHeight);
+    context.stroke();
+
+    AXES.forEach(function (axis) {
+        context.fillStyle = plot.colors[axis];
+        context.strokeStyle = cssColor("--surface");
+        context.lineWidth = 2;
+        context.beginPath();
+        context.arc(x, plot.yOfValue(sample[axis]), 4, 0, 2 * Math.PI);
+        context.fill();
+        context.stroke();
+    });
+
+    tooltip.replaceChildren();
+    const time = document.createElement("div");
+    time.className = "time";
+    time.textContent = (age === 0) ? "now" : "-" + (age / NOMINAL_RATE_HZ).toFixed(2) + " s";
+    tooltip.appendChild(time);
+    AXES.forEach(function (axis) {
+        const row = document.createElement("div");
+        const swatch = document.createElement("span");
+        swatch.className = "swatch";
+        swatch.style.background = plot.colors[axis];
+        row.appendChild(swatch);
+        row.appendChild(document.createTextNode(axis.toUpperCase() + "  " + sample[axis] + " mg"));
+        tooltip.appendChild(row);
+    });
+
+    tooltip.style.display = "block";
+    const flip = x > plot.margin.left + plot.plotWidth / 2;
+    tooltip.style.left = (flip ? x - tooltip.offsetWidth - 12 : x + 12) + "px";
+    tooltip.style.top = (plot.margin.top + 8) + "px";
+}
+
+/* Bubble level: the dot shows where gravity points in the sensor X/Y plane */
+function drawLevel(latest) {
+    const canvas = prepareCanvas(elements.level);
+    const context = canvas.context;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const radius = Math.min(canvas.width, canvas.height) / 2 - 16;
+
+    context.lineWidth = 1;
+    context.strokeStyle = cssColor("--grid");
+    [1, 0.5].forEach(function (scale) {
+        context.beginPath();
+        context.arc(centerX, centerY, radius * scale, 0, 2 * Math.PI);
+        context.stroke();
+    });
+    context.beginPath();
+    context.moveTo(centerX - radius, centerY + 0.5);
+    context.lineTo(centerX + radius, centerY + 0.5);
+    context.moveTo(centerX + 0.5, centerY - radius);
+    context.lineTo(centerX + 0.5, centerY + radius);
+    context.stroke();
+
+    context.fillStyle = cssColor("--text-muted");
+    context.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("+X", centerX + radius + 9, centerY);
+    context.fillText("+Y", centerX, centerY - radius - 9);
+
+    if (latest === null) {
+        return;
+    }
+
+    /* 1 g on an axis puts the dot on the outer ring, larger values are clamped to it */
+    let dotX = latest.x / 1000;
+    let dotY = latest.y / 1000;
+    const length = Math.hypot(dotX, dotY);
+    if (length > 1) {
+        dotX /= length;
+        dotY /= length;
+    }
+
+    context.fillStyle = cssColor("--accent");
+    context.strokeStyle = cssColor("--surface");
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(centerX + dotX * radius, centerY - dotY * radius, 9, 0, 2 * Math.PI);
+    context.fill();
+    context.stroke();
+}
+
+function updateReadouts(latest) {
+    if (latest === null) {
+        return;
+    }
+
+    const toDegrees = 180 / Math.PI;
+    const pitch = Math.atan2(-latest.x, Math.hypot(latest.y, latest.z)) * toDegrees;
+    const roll = Math.atan2(latest.y, latest.z) * toDegrees;
+
+    elements.x.textContent = latest.x;
+    elements.y.textContent = latest.y;
+    elements.z.textContent = latest.z;
+    elements.magnitude.textContent = Math.round(Math.hypot(latest.x, latest.y, latest.z));
+    elements.pitch.textContent = pitch.toFixed(0);
+    elements.roll.textContent = roll.toFixed(0);
+}
+
+function updateRate(now) {
+    const elapsed = now - state.rateWindowStart;
+
+    if (elapsed < 1000) {
+        return;
+    }
+
+    if (state.connected) {
+        elements.rate.textContent = (state.rateWindowCount * 1000 / elapsed).toFixed(1);
+    }
+    state.rateWindowStart = now;
+    state.rateWindowCount = 0;
+
+    if (state.recording !== null) {
+        const seconds = (now - state.recording.startedAt) / 1000;
+        elements.recordInfo.textContent = state.recording.rows.length + " samples, " + seconds.toFixed(0) + " s";
+    }
+}
+
+function frame(now) {
+    updateRate(now);
+
+    if (state.dirty) {
+        const latest = (samples.count > 0) ? sampleAt(0) : null;
+        state.dirty = false;
+        drawPlot();
+        drawLevel(latest);
+        updateReadouts(latest);
+    }
+
+    requestAnimationFrame(frame);
+}
+
+/* Synthetic stream for trying the page without a board: slow tilt plus a periodic shake */
+function startDemo() {
+    let tick = 0;
+
+    setConnected(true);
+    elements.status.textContent = "Demo data";
+    elements.connect.disabled = true;
+
+    setInterval(function () {
+        const time = tick / NOMINAL_RATE_HZ;
+        const tilt = 0.6 * Math.sin(time * 0.8);
+        const shake = ((time % 6) > 4.5) ? 700 * Math.sin(time * 40) : 0;
+        const noise = function () { return (Math.random() - 0.5) * 30; };
+
+        pushSample(Math.round(1000 * Math.sin(tilt) + shake + noise()),
+                   Math.round(250 * Math.sin(time * 0.5) + shake * 0.4 + noise()),
+                   Math.round(1000 * Math.cos(tilt) + noise()));
+        tick += 1;
+    }, 1000 / NOMINAL_RATE_HZ);
+}
+
+elements.connect.addEventListener("click", function () {
+    if (state.connected) {
+        disconnect();
+    } else {
+        connect();
+    }
+});
+
+elements.pause.addEventListener("click", function () {
+    state.paused = !state.paused;
+    elements.pause.textContent = state.paused ? "Resume" : "Pause";
+});
+
+elements.record.addEventListener("click", function () {
+    if (state.recording === null) {
+        startRecording();
+    } else {
+        stopRecording();
+    }
+});
+
+elements.windowSelect.addEventListener("change", function () { state.dirty = true; });
+elements.plot.addEventListener("mousemove", function (event) {
+    state.hoverX = event.offsetX;
+    state.dirty = true;
+});
+elements.plot.addEventListener("mouseleave", function () {
+    state.hoverX = null;
+    state.dirty = true;
+});
+window.addEventListener("resize", function () { state.dirty = true; });
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { state.dirty = true; });
+
+if (new URLSearchParams(location.search).has("demo")) {
+    startDemo();
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

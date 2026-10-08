@@ -5,9 +5,24 @@
 
 #include <cstdio>
 
+extern "C"
+{
+extern USBD_HandleTypeDef hUsbDeviceFS;
+}
+
 namespace
 {
-constexpr uint32_t ACCELEROMETER_REPORT_PERIOD_MS = 1000U;
+constexpr uint32_t ACCELEROMETER_RETRY_PERIOD_MS = 1000U;
+
+/* True when a host has configured the port and the previous transfer has completed */
+bool usbCdcReady()
+{
+    const USBD_CDC_HandleTypeDef* cdc =
+        static_cast<const USBD_CDC_HandleTypeDef*>(hUsbDeviceFS.pClassData);
+
+    return (hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED) && (cdc != nullptr) &&
+           (cdc->TxState == 0U);
+}
 }
 
 Application::Application()
@@ -19,7 +34,9 @@ Application::Application()
       led3_(led3Gpio_),
       accelerometer_(),
       accelerometerReady_(false),
-      lastAccelerometerTick_(0U)
+      lastAccelerometerRetryTick_(0U),
+      samples_(),
+      txBuffer_()
 {
 }
 
@@ -35,11 +52,7 @@ void Application::init()
 
 void Application::run()
 {
-    if ((HAL_GetTick() - lastAccelerometerTick_) >= ACCELEROMETER_REPORT_PERIOD_MS)
-    {
-        lastAccelerometerTick_ = HAL_GetTick();
-        reportAccelerometer();
-    }
+    streamAccelerometer();
 }
 
 void Application::setLed(bool on)
@@ -54,34 +67,70 @@ void Application::setLed(bool on)
     }
 }
 
-/* Sensor bring-up aid: prints one sample in milli-g over USB CDC and retries the init for as
-   long as the sensor does not answer. Best effort, the line is dropped if CDC is busy. */
-void Application::reportAccelerometer()
+/* Streams every buffered accelerometer sample over USB CDC as a "x,y,z" CSV line in milli-g.
+   Lines starting with '#' are status messages. Nothing is drained while the port is busy or
+   closed, the sensor FIFO absorbs up to 320 ms and then drops the oldest samples. */
+void Application::streamAccelerometer()
 {
-    Adxl345Sample sample = {0, 0, 0};
-    char line[48];
-    int length;
+    uint8_t count = 0U;
+    uint32_t length = 0U;
+
+    if (!usbCdcReady())
+    {
+        return;
+    }
 
     if (!accelerometerReady_)
     {
+        if ((HAL_GetTick() - lastAccelerometerRetryTick_) < ACCELEROMETER_RETRY_PERIOD_MS)
+        {
+            return;
+        }
+
+        lastAccelerometerRetryTick_ = HAL_GetTick();
         accelerometerReady_ = adxl345Init(&accelerometer_);
+        if (!accelerometerReady_)
+        {
+            sendLine("# ADXL345 not found\r\n");
+        }
+        return;
     }
 
-    if (!accelerometerReady_)
-    {
-        length = std::snprintf(line, sizeof(line), "ADXL345 not found\r\n");
-    }
-    else if (adxl345Read(&accelerometer_, &sample))
-    {
-        length = std::snprintf(line, sizeof(line), "accel mg x=%d y=%d z=%d\r\n",
-                               static_cast<int>(sample.x), static_cast<int>(sample.y),
-                               static_cast<int>(sample.z));
-    }
-    else
+    if (!adxl345ReadFifo(&accelerometer_, samples_, ADXL345_FIFO_DEPTH, &count))
     {
         accelerometerReady_ = false;
-        length = std::snprintf(line, sizeof(line), "ADXL345 read failed\r\n");
+        sendLine("# ADXL345 read failed\r\n");
+        return;
     }
 
-    (void)CDC_Transmit_FS(reinterpret_cast<uint8_t*>(line), static_cast<uint16_t>(length));
+    for (uint8_t i = 0U; i < count; i++)
+    {
+        const int written = std::snprintf(&txBuffer_[length], sizeof(txBuffer_) - length,
+                                          "%d,%d,%d\r\n",
+                                          static_cast<int>(samples_[i].x),
+                                          static_cast<int>(samples_[i].y),
+                                          static_cast<int>(samples_[i].z));
+
+        if ((written <= 0) || (static_cast<uint32_t>(written) >= (sizeof(txBuffer_) - length)))
+        {
+            break;
+        }
+
+        length += static_cast<uint32_t>(written);
+    }
+
+    if (length > 0U)
+    {
+        (void)CDC_Transmit_FS(reinterpret_cast<uint8_t*>(txBuffer_), static_cast<uint16_t>(length));
+    }
+}
+
+void Application::sendLine(const char* text)
+{
+    const int length = std::snprintf(txBuffer_, sizeof(txBuffer_), "%s", text);
+
+    if (length > 0)
+    {
+        (void)CDC_Transmit_FS(reinterpret_cast<uint8_t*>(txBuffer_), static_cast<uint16_t>(length));
+    }
 }

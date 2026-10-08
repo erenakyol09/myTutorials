@@ -9,11 +9,15 @@
 #define ADXL345_REG_POWER_CTL       0x2DU
 #define ADXL345_REG_DATA_FORMAT     0x31U
 #define ADXL345_REG_DATAX0          0x32U
+#define ADXL345_REG_FIFO_CTL        0x38U
+#define ADXL345_REG_FIFO_STATUS     0x39U
 
 #define ADXL345_DEVID_VALUE         0xE5U
 #define ADXL345_BW_RATE_100HZ       0x0AU
 #define ADXL345_DATA_FORMAT_FULL_4G 0x09U
 #define ADXL345_POWER_CTL_MEASURE   0x08U
+#define ADXL345_FIFO_CTL_STREAM     0x80U
+#define ADXL345_FIFO_ENTRIES_MASK   0x3FU
 
 #define ADXL345_DATA_LEN            6U
 
@@ -60,6 +64,7 @@ bool adxl345Init(Adxl345 *self)
 
     if (!adxl345WriteRegister(self, ADXL345_REG_BW_RATE, ADXL345_BW_RATE_100HZ) ||
         !adxl345WriteRegister(self, ADXL345_REG_DATA_FORMAT, ADXL345_DATA_FORMAT_FULL_4G) ||
+        !adxl345WriteRegister(self, ADXL345_REG_FIFO_CTL, ADXL345_FIFO_CTL_STREAM) ||
         !adxl345WriteRegister(self, ADXL345_REG_POWER_CTL, ADXL345_POWER_CTL_MEASURE))
     {
         return false;
@@ -70,24 +75,44 @@ bool adxl345Init(Adxl345 *self)
     return true;
 }
 
-bool adxl345Read(Adxl345 *self, Adxl345Sample *sample)
+bool adxl345ReadFifo(Adxl345 *self, Adxl345Sample *samples, uint8_t maxCount, uint8_t *count)
 {
     uint8_t data[ADXL345_DATA_LEN] = {0U};
+    uint8_t pending = 0U;
+    uint8_t i;
 
-    if ((self == NULL) || (sample == NULL) || !self->initialized)
+    if ((self == NULL) || (samples == NULL) || (count == NULL) || !self->initialized)
     {
         return false;
     }
 
-    /* All six bytes are read in one transfer so the axes belong to the same sample */
-    if (!adxl345ReadRegisters(self, ADXL345_REG_DATAX0, data, ADXL345_DATA_LEN))
+    *count = 0U;
+
+    if (!adxl345ReadRegisters(self, ADXL345_REG_FIFO_STATUS, &pending, 1U))
     {
         return false;
     }
 
-    sample->x = adxl345ToMilliG(data[0], data[1]);
-    sample->y = adxl345ToMilliG(data[2], data[3]);
-    sample->z = adxl345ToMilliG(data[4], data[5]);
+    pending &= ADXL345_FIFO_ENTRIES_MASK;
+    if (pending > maxCount)
+    {
+        pending = maxCount;
+    }
+
+    for (i = 0U; i < pending; i++)
+    {
+        /* Each read of the six data registers pops one entry. They are read in one transfer
+           so the axes belong to the same sample. */
+        if (!adxl345ReadRegisters(self, ADXL345_REG_DATAX0, data, ADXL345_DATA_LEN))
+        {
+            return false;
+        }
+
+        samples[i].x = adxl345ToMilliG(data[0], data[1]);
+        samples[i].y = adxl345ToMilliG(data[2], data[3]);
+        samples[i].z = adxl345ToMilliG(data[4], data[5]);
+        *count = (uint8_t)(i + 1U);
+    }
 
     return true;
 }
