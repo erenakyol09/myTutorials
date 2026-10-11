@@ -30,6 +30,7 @@ void tiltEstimatorUpdate(TiltEstimator *self, int16_t x, int16_t y, int16_t z, T
     float sampleZ = (float)z;
     float tiltX;
     float tiltY;
+    float tiltZ;
     float tiltLength;
 
     if ((self == NULL) || (state == NULL))
@@ -61,9 +62,12 @@ void tiltEstimatorUpdate(TiltEstimator *self, int16_t x, int16_t y, int16_t z, T
         tiltY /= tiltLength;
     }
 
+    tiltZ = fminf(fmaxf(self->gravityZ / TILT_ONE_G_MILLI_G, -1.0f), 1.0f);
+
     state->magnitude = tiltRound(sqrtf((sampleX * sampleX) + (sampleY * sampleY) + (sampleZ * sampleZ)));
     state->tiltX = tiltRound(tiltX * TILT_FULL_SCALE);
     state->tiltY = tiltRound(tiltY * TILT_FULL_SCALE);
+    state->tiltZ = tiltRound(tiltZ * TILT_FULL_SCALE);
     state->pitch = tiltRound(atan2f(-self->gravityX,
                                     sqrtf((self->gravityY * self->gravityY) +
                                           (self->gravityZ * self->gravityZ))) * TILT_RAD_TO_DEG);

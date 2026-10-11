@@ -73,9 +73,9 @@ void Application::setLed(bool on)
 }
 
 /* Streams every buffered accelerometer sample over USB CDC as one CSV line:
-       x,y,z,magnitude,tiltX,tiltY,pitch,roll
-   x, y, z and magnitude are in milli-g, tiltX and tiltY in thousandths of full tilt, pitch and
-   roll in degrees. Everything is computed here so the viewer only has to display it.
+       x,y,z,magnitude,tiltX,tiltY,tiltZ,pitch,roll
+   x, y, z and magnitude are in milli-g, tiltX, tiltY and tiltZ in thousandths of full tilt,
+   pitch and roll in degrees. Everything is computed here so the viewer only has to display it.
    Lines starting with '#' are status messages. Nothing is drained while the port is busy or
    closed, the sensor FIFO absorbs up to 320 ms and then drops the oldest samples. */
 void Application::streamAccelerometer()
@@ -113,18 +113,19 @@ void Application::streamAccelerometer()
 
     for (uint8_t i = 0U; i < count; i++)
     {
-        TiltState tilt = {0, 0, 0, 0, 0};
+        TiltState tilt = {0, 0, 0, 0, 0, 0};
 
         tiltEstimatorUpdate(&tiltEstimator_, samples_[i].x, samples_[i].y, samples_[i].z, &tilt);
 
         const int written = std::snprintf(&txBuffer_[length], sizeof(txBuffer_) - length,
-                                          "%d,%d,%d,%d,%d,%d,%d,%d\r\n",
+                                          "%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
                                           static_cast<int>(samples_[i].x),
                                           static_cast<int>(samples_[i].y),
                                           static_cast<int>(samples_[i].z),
                                           static_cast<int>(tilt.magnitude),
                                           static_cast<int>(tilt.tiltX),
                                           static_cast<int>(tilt.tiltY),
+                                          static_cast<int>(tilt.tiltZ),
                                           static_cast<int>(tilt.pitch),
                                           static_cast<int>(tilt.roll));
 

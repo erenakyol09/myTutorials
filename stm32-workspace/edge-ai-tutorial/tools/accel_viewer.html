@@ -6,7 +6,7 @@
 <title>ADXL345 Viewer</title>
 <!--
   Live viewer and recorder for the CSV stream the firmware sends over USB CDC, one line per sample:
-      x,y,z,magnitude,tiltX,tiltY,pitch,roll
+      x,y,z,magnitude,tiltX,tiltY,tiltZ,pitch,roll
   This page only displays what it receives. Filtering, orientation and units are decided by the
   firmware, see Application::streamAccelerometer().
   Needs the Web Serial API: open this file in Chrome or Edge.
@@ -87,15 +87,13 @@ button.recording { background: var(--recording); border-color: var(--recording);
 .tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tile .unit { font-size: 12px; font-weight: 400; color: var(--text-muted); margin-left: 4px; }
 .swatch { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
-.row { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; }
-@media (max-width: 760px) { .row { grid-template-columns: minmax(0, 1fr); } }
 .chart-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; }
 .chart-head h2 { margin: 0 auto 0 0; }
 .legend { display: flex; gap: 12px; color: var(--text-secondary); font-size: 12px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.plot { position: relative; height: 340px; }
+.plot { position: relative; height: 320px; }
 .plot canvas, .level canvas { width: 100%; height: 100%; display: block; }
-.level { height: 236px; }
+.level { height: 560px; }
 #tooltip {
     position: absolute;
     pointer-events: none;
@@ -150,34 +148,33 @@ button.recording { background: var(--recording); border-color: var(--recording);
         </div>
     </section>
 
-    <section class="row">
-        <div class="panel">
-            <div class="chart-head">
-                <h2>Acceleration (mg)</h2>
-                <div class="legend">
-                    <span><span class="swatch" style="background: var(--series-x)"></span>X</span>
-                    <span><span class="swatch" style="background: var(--series-y)"></span>Y</span>
-                    <span><span class="swatch" style="background: var(--series-z)"></span>Z</span>
-                </div>
-                <select id="windowSelect" aria-label="Time window">
-                    <option value="2">Last 2 s</option>
-                    <option value="5" selected>Last 5 s</option>
-                    <option value="10">Last 10 s</option>
-                    <option value="30">Last 30 s</option>
-                </select>
-            </div>
-            <div class="plot">
-                <canvas id="plotCanvas"></canvas>
-                <div id="tooltip"></div>
-            </div>
+    <section class="panel">
+        <h2>Tilt</h2>
+        <div class="level"><canvas id="levelCanvas"></canvas></div>
+        <div class="angles">
+            <span>Pitch <b id="valuePitch">--</b> deg</span>
+            <span>Roll <b id="valueRoll">--</b> deg</span>
         </div>
-        <div class="panel">
-            <h2>Tilt</h2>
-            <div class="level"><canvas id="levelCanvas"></canvas></div>
-            <div class="angles">
-                <span>Pitch <b id="valuePitch">--</b> deg</span>
-                <span>Roll <b id="valueRoll">--</b> deg</span>
+    </section>
+
+    <section class="panel">
+        <div class="chart-head">
+            <h2>Acceleration (mg)</h2>
+            <div class="legend">
+                <span><span class="swatch" style="background: var(--series-x)"></span>X</span>
+                <span><span class="swatch" style="background: var(--series-y)"></span>Y</span>
+                <span><span class="swatch" style="background: var(--series-z)"></span>Z</span>
             </div>
+            <select id="windowSelect" aria-label="Time window">
+                <option value="2">Last 2 s</option>
+                <option value="5" selected>Last 5 s</option>
+                <option value="10">Last 10 s</option>
+                <option value="30">Last 30 s</option>
+            </select>
+        </div>
+        <div class="plot">
+            <canvas id="plotCanvas"></canvas>
+            <div id="tooltip"></div>
         </div>
     </section>
 
@@ -200,8 +197,8 @@ const BUFFER_SECONDS = 30;
 const BUFFER_SIZE = NOMINAL_RATE_HZ * BUFFER_SECONDS;
 const MIN_RANGE_MG = 2000;
 const GRID_STEP_MG = 1000;
-const SAMPLE_FIELDS = ["x", "y", "z", "magnitude", "tiltX", "tiltY", "pitch", "roll"];
-const SAMPLE_PATTERN = /^-?\d+(,-?\d+){7}$/;
+const SAMPLE_FIELDS = ["x", "y", "z", "magnitude", "tiltX", "tiltY", "tiltZ", "pitch", "roll"];
+const SAMPLE_PATTERN = /^-?\d+(,-?\d+){8}$/;
 const TILT_FULL_SCALE = 1000;
 const AXES = ["x", "y", "z"];
 
@@ -556,49 +553,155 @@ function drawHover(context, plot) {
     tooltip.style.top = (plot.margin.top + 8) + "px";
 }
 
-/* Tilt view: draws the dot at the position the firmware reports, full scale is the outer ring */
+/* Rotation that brings the sensor frame into the world frame, as a row-major 3x3 matrix. `up`
+   is the unit vector the firmware reports as pointing up, in sensor coordinates. Gravity fixes
+   only two angles, so this is the smallest rotation that turns `up` into the world Z axis. */
+function rotationFromUp(up) {
+    const cosine = up.z;
+
+    if (cosine < -0.9999) {
+        /* Upside down: the smallest rotation is not unique, flip around X */
+        return [1, 0, 0, 0, -1, 0, 0, 0, -1];
+    }
+
+    const k = 1 / (1 + cosine);
+    return [1 - k * up.x * up.x, -k * up.x * up.y, -up.x,
+            -k * up.x * up.y, 1 - k * up.y * up.y, -up.y,
+            up.x, up.y, cosine];
+}
+
+/* Tilt view: draws the board as a 3D box in the orientation the firmware reports */
 function drawLevel(latest) {
     const canvas = prepareCanvas(elements.level);
     const context = canvas.context;
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    const radius = Math.min(canvas.width, canvas.height) / 2 - 16;
+    const scale = Math.min(canvas.width, canvas.height) * 0.32;
+    const cameraYaw = -0.5;
+    const cameraElevation = 0.45;
+    const half = { x: 1.0, y: 0.65, z: 0.1 };
+    const axisLength = 1.45;
+    let up = { x: 0, y: 0, z: 1 };
 
-    context.lineWidth = 1;
-    context.strokeStyle = cssColor("--grid");
-    [1, 0.5].forEach(function (scale) {
-        context.beginPath();
-        context.arc(centerX, centerY, radius * scale, 0, 2 * Math.PI);
-        context.stroke();
-    });
-    context.beginPath();
-    context.moveTo(centerX - radius, centerY + 0.5);
-    context.lineTo(centerX + radius, centerY + 0.5);
-    context.moveTo(centerX + 0.5, centerY - radius);
-    context.lineTo(centerX + 0.5, centerY + radius);
-    context.stroke();
-
-    context.fillStyle = cssColor("--text-muted");
-    context.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText("+X", centerX + radius + 9, centerY);
-    context.fillText("+Y", centerX, centerY - radius - 9);
-
-    if (latest === null) {
-        return;
+    if (latest !== null) {
+        /* tiltX and tiltY point toward the lowered side, so "up" is their opposite */
+        const length = Math.hypot(latest.tiltX, latest.tiltY, latest.tiltZ) || 1;
+        up = { x: -latest.tiltX / length, y: -latest.tiltY / length, z: latest.tiltZ / length };
     }
 
-    const dotX = latest.tiltX / TILT_FULL_SCALE;
-    const dotY = latest.tiltY / TILT_FULL_SCALE;
+    const rotation = rotationFromUp(up);
 
-    context.fillStyle = cssColor("--accent");
-    context.strokeStyle = cssColor("--surface");
-    context.lineWidth = 2;
+    /* Sensor coordinates to screen. Depth grows away from the viewer. */
+    const project = function (point, rotate) {
+        let x = point[0];
+        let y = point[1];
+        let z = point[2];
+
+        if (rotate) {
+            const rx = rotation[0] * x + rotation[1] * y + rotation[2] * z;
+            const ry = rotation[3] * x + rotation[4] * y + rotation[5] * z;
+            const rz = rotation[6] * x + rotation[7] * y + rotation[8] * z;
+            x = rx;
+            y = ry;
+            z = rz;
+        }
+
+        const viewX = x * Math.cos(cameraYaw) - y * Math.sin(cameraYaw);
+        const viewY = x * Math.sin(cameraYaw) + y * Math.cos(cameraYaw);
+
+        return {
+            x: centerX + scale * viewX,
+            y: centerY - scale * (z * Math.cos(cameraElevation) + viewY * Math.sin(cameraElevation)),
+            depth: viewY * Math.cos(cameraElevation) - z * Math.sin(cameraElevation)
+        };
+    };
+
+    /* Level reference: a ring lying flat in the world */
+    context.strokeStyle = cssColor("--grid");
+    context.lineWidth = 1;
     context.beginPath();
-    context.arc(centerX + dotX * radius, centerY - dotY * radius, 9, 0, 2 * Math.PI);
-    context.fill();
+    for (let step = 0; step <= 48; step++) {
+        const angle = (step / 48) * 2 * Math.PI;
+        const point = project([axisLength * Math.cos(angle), axisLength * Math.sin(angle), 0], false);
+        if (step === 0) {
+            context.moveTo(point.x, point.y);
+        } else {
+            context.lineTo(point.x, point.y);
+        }
+    }
     context.stroke();
+
+    const axes = [
+        { label: "X", color: cssColor("--series-x"), tip: project([axisLength, 0, 0], true) },
+        { label: "Y", color: cssColor("--series-y"), tip: project([0, axisLength, 0], true) },
+        { label: "Z", color: cssColor("--series-z"), tip: project([0, 0, axisLength * 0.7], true) }
+    ];
+    const origin = project([0, 0, 0], true);
+    const drawAxis = function (axis) {
+        context.strokeStyle = axis.color;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(origin.x, origin.y);
+        context.lineTo(axis.tip.x, axis.tip.y);
+        context.stroke();
+
+        const dx = axis.tip.x - origin.x;
+        const dy = axis.tip.y - origin.y;
+        const length = Math.hypot(dx, dy) || 1;
+        context.fillStyle = cssColor("--text-secondary");
+        context.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(axis.label, axis.tip.x + (dx / length) * 10, axis.tip.y + (dy / length) * 10);
+    };
+
+    /* Corner i has bit 0 for +X, bit 1 for +Y, bit 2 for +Z */
+    const corners = [];
+    for (let index = 0; index < 8; index++) {
+        corners.push(project([(index & 1) ? half.x : -half.x,
+                              (index & 2) ? half.y : -half.y,
+                              (index & 4) ? half.z : -half.z], true));
+    }
+    const faces = [
+        { corners: [4, 5, 7, 6], color: cssColor("--accent"), alpha: 0.55 },        /* top */
+        { corners: [0, 2, 3, 1], color: cssColor("--text-muted"), alpha: 0.25 },    /* bottom */
+        { corners: [0, 1, 5, 4], color: cssColor("--text-muted"), alpha: 0.5 },
+        { corners: [2, 6, 7, 3], color: cssColor("--text-muted"), alpha: 0.5 },
+        { corners: [0, 4, 6, 2], color: cssColor("--text-muted"), alpha: 0.65 },
+        { corners: [1, 3, 7, 5], color: cssColor("--text-muted"), alpha: 0.65 }
+    ];
+    faces.forEach(function (face) {
+        face.depth = face.corners.reduce(function (sum, corner) { return sum + corners[corner].depth; }, 0) / 4;
+    });
+    faces.sort(function (first, second) { return second.depth - first.depth; });
+
+    /* Axes pointing away from the viewer go behind the box, the others in front of it */
+    axes.filter(function (axis) { return axis.tip.depth > origin.depth; }).forEach(drawAxis);
+
+    faces.forEach(function (face) {
+        context.beginPath();
+        face.corners.forEach(function (corner, index) {
+            if (index === 0) {
+                context.moveTo(corners[corner].x, corners[corner].y);
+            } else {
+                context.lineTo(corners[corner].x, corners[corner].y);
+            }
+        });
+        context.closePath();
+        /* Opaque surface first so the faces behind do not show through the tint */
+        context.fillStyle = cssColor("--surface");
+        context.fill();
+        context.globalAlpha = face.alpha;
+        context.fillStyle = face.color;
+        context.fill();
+        context.globalAlpha = 1;
+        context.strokeStyle = cssColor("--text-secondary");
+        context.lineWidth = 1;
+        context.lineJoin = "round";
+        context.stroke();
+    });
+
+    axes.filter(function (axis) { return axis.tip.depth <= origin.depth; }).forEach(drawAxis);
 }
 
 function updateReadouts(latest) {
