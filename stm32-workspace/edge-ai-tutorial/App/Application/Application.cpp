@@ -14,6 +14,9 @@ namespace
 {
 constexpr uint32_t ACCELEROMETER_RETRY_PERIOD_MS = 1000U;
 
+/* Weight of each 100 Hz sample in the gravity low-pass filter. Smaller is steadier but slower. */
+constexpr float TILT_SMOOTHING = 0.1f;
+
 /* True when a host has configured the port and the previous transfer has completed */
 bool usbCdcReady()
 {
@@ -35,6 +38,7 @@ Application::Application()
       accelerometer_(),
       accelerometerReady_(false),
       lastAccelerometerRetryTick_(0U),
+      tiltEstimator_(),
       samples_(),
       txBuffer_()
 {
@@ -46,6 +50,7 @@ void Application::init()
     led2_.off();
     led3_.off();
 
+    tiltEstimatorCreate(&tiltEstimator_, TILT_SMOOTHING);
     adxl345Create(&accelerometer_, &hi2c1, ADXL345_ADDRESS_SDO_LOW);
     accelerometerReady_ = adxl345Init(&accelerometer_);
 }
@@ -67,7 +72,10 @@ void Application::setLed(bool on)
     }
 }
 
-/* Streams every buffered accelerometer sample over USB CDC as a "x,y,z" CSV line in milli-g.
+/* Streams every buffered accelerometer sample over USB CDC as one CSV line:
+       x,y,z,magnitude,tiltX,tiltY,pitch,roll
+   x, y, z and magnitude are in milli-g, tiltX and tiltY in thousandths of full tilt, pitch and
+   roll in degrees. Everything is computed here so the viewer only has to display it.
    Lines starting with '#' are status messages. Nothing is drained while the port is busy or
    closed, the sensor FIFO absorbs up to 320 ms and then drops the oldest samples. */
 void Application::streamAccelerometer()
@@ -105,11 +113,20 @@ void Application::streamAccelerometer()
 
     for (uint8_t i = 0U; i < count; i++)
     {
+        TiltState tilt = {0, 0, 0, 0, 0};
+
+        tiltEstimatorUpdate(&tiltEstimator_, samples_[i].x, samples_[i].y, samples_[i].z, &tilt);
+
         const int written = std::snprintf(&txBuffer_[length], sizeof(txBuffer_) - length,
-                                          "%d,%d,%d\r\n",
+                                          "%d,%d,%d,%d,%d,%d,%d,%d\r\n",
                                           static_cast<int>(samples_[i].x),
                                           static_cast<int>(samples_[i].y),
-                                          static_cast<int>(samples_[i].z));
+                                          static_cast<int>(samples_[i].z),
+                                          static_cast<int>(tilt.magnitude),
+                                          static_cast<int>(tilt.tiltX),
+                                          static_cast<int>(tilt.tiltY),
+                                          static_cast<int>(tilt.pitch),
+                                          static_cast<int>(tilt.roll));
 
         if ((written <= 0) || (static_cast<uint32_t>(written) >= (sizeof(txBuffer_) - length)))
         {

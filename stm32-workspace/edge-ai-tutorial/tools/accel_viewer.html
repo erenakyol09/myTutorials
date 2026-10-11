@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ADXL345 Viewer</title>
 <!--
-  Live viewer and recorder for the "x,y,z" milli-g CSV stream the firmware sends over USB CDC.
+  Live viewer and recorder for the CSV stream the firmware sends over USB CDC, one line per sample:
+      x,y,z,magnitude,tiltX,tiltY,pitch,roll
+  This page only displays what it receives. Filtering, orientation and units are decided by the
+  firmware, see Application::streamAccelerometer().
   Needs the Web Serial API: open this file in Chrome or Edge.
-  Append ?demo to the URL to run on synthetic data without a board.
 -->
 <style>
 :root {
@@ -198,7 +200,9 @@ const BUFFER_SECONDS = 30;
 const BUFFER_SIZE = NOMINAL_RATE_HZ * BUFFER_SECONDS;
 const MIN_RANGE_MG = 2000;
 const GRID_STEP_MG = 1000;
-const SAMPLE_PATTERN = /^(-?\d+),(-?\d+),(-?\d+)$/;
+const SAMPLE_FIELDS = ["x", "y", "z", "magnitude", "tiltX", "tiltY", "pitch", "roll"];
+const SAMPLE_PATTERN = /^-?\d+(,-?\d+){7}$/;
+const TILT_FULL_SCALE = 1000;
 const AXES = ["x", "y", "z"];
 
 const elements = {
@@ -239,25 +243,28 @@ const state = {
     rateWindowStart: performance.now(),
     rateWindowCount: 0,
     hoverX: null,
+    latest: null,
     dirty: true
 };
 
-function pushSample(x, y, z) {
+function pushSample(sample) {
     state.rateWindowCount += 1;
 
     if (state.recording !== null) {
-        state.recording.rows.push(x + "," + y + "," + z);
+        state.recording.rows.push(sample.x + "," + sample.y + "," + sample.z);
     }
 
     if (state.paused) {
         return;
     }
 
-    samples.x[samples.head] = x;
-    samples.y[samples.head] = y;
-    samples.z[samples.head] = z;
+    samples.x[samples.head] = sample.x;
+    samples.y[samples.head] = sample.y;
+    samples.z[samples.head] = sample.z;
     samples.head = (samples.head + 1) % BUFFER_SIZE;
     samples.count = Math.min(samples.count + 1, BUFFER_SIZE);
+
+    state.latest = sample;
     state.dirty = true;
 }
 
@@ -269,10 +276,13 @@ function sampleAt(age) {
 
 function handleLine(line) {
     const text = line.trim();
-    const match = SAMPLE_PATTERN.exec(text);
 
-    if (match !== null) {
-        pushSample(Number(match[1]), Number(match[2]), Number(match[3]));
+    if (SAMPLE_PATTERN.test(text)) {
+        const sample = {};
+        text.split(",").forEach(function (value, index) {
+            sample[SAMPLE_FIELDS[index]] = Number(value);
+        });
+        pushSample(sample);
     } else if (text.startsWith("#")) {
         elements.status.textContent = text.slice(1).trim();
     }
@@ -546,7 +556,7 @@ function drawHover(context, plot) {
     tooltip.style.top = (plot.margin.top + 8) + "px";
 }
 
-/* Bubble level: the dot shows where gravity points in the sensor X/Y plane */
+/* Tilt view: draws the dot at the position the firmware reports, full scale is the outer ring */
 function drawLevel(latest) {
     const canvas = prepareCanvas(elements.level);
     const context = canvas.context;
@@ -579,14 +589,8 @@ function drawLevel(latest) {
         return;
     }
 
-    /* 1 g on an axis puts the dot on the outer ring, larger values are clamped to it */
-    let dotX = latest.x / 1000;
-    let dotY = latest.y / 1000;
-    const length = Math.hypot(dotX, dotY);
-    if (length > 1) {
-        dotX /= length;
-        dotY /= length;
-    }
+    const dotX = latest.tiltX / TILT_FULL_SCALE;
+    const dotY = latest.tiltY / TILT_FULL_SCALE;
 
     context.fillStyle = cssColor("--accent");
     context.strokeStyle = cssColor("--surface");
@@ -602,16 +606,12 @@ function updateReadouts(latest) {
         return;
     }
 
-    const toDegrees = 180 / Math.PI;
-    const pitch = Math.atan2(-latest.x, Math.hypot(latest.y, latest.z)) * toDegrees;
-    const roll = Math.atan2(latest.y, latest.z) * toDegrees;
-
     elements.x.textContent = latest.x;
     elements.y.textContent = latest.y;
     elements.z.textContent = latest.z;
-    elements.magnitude.textContent = Math.round(Math.hypot(latest.x, latest.y, latest.z));
-    elements.pitch.textContent = pitch.toFixed(0);
-    elements.roll.textContent = roll.toFixed(0);
+    elements.magnitude.textContent = latest.magnitude;
+    elements.pitch.textContent = latest.pitch;
+    elements.roll.textContent = latest.roll;
 }
 
 function updateRate(now) {
@@ -637,35 +637,13 @@ function frame(now) {
     updateRate(now);
 
     if (state.dirty) {
-        const latest = (samples.count > 0) ? sampleAt(0) : null;
         state.dirty = false;
         drawPlot();
-        drawLevel(latest);
-        updateReadouts(latest);
+        drawLevel(state.latest);
+        updateReadouts(state.latest);
     }
 
     requestAnimationFrame(frame);
-}
-
-/* Synthetic stream for trying the page without a board: slow tilt plus a periodic shake */
-function startDemo() {
-    let tick = 0;
-
-    setConnected(true);
-    elements.status.textContent = "Demo data";
-    elements.connect.disabled = true;
-
-    setInterval(function () {
-        const time = tick / NOMINAL_RATE_HZ;
-        const tilt = 0.6 * Math.sin(time * 0.8);
-        const shake = ((time % 6) > 4.5) ? 700 * Math.sin(time * 40) : 0;
-        const noise = function () { return (Math.random() - 0.5) * 30; };
-
-        pushSample(Math.round(1000 * Math.sin(tilt) + shake + noise()),
-                   Math.round(250 * Math.sin(time * 0.5) + shake * 0.4 + noise()),
-                   Math.round(1000 * Math.cos(tilt) + noise()));
-        tick += 1;
-    }, 1000 / NOMINAL_RATE_HZ);
 }
 
 elements.connect.addEventListener("click", function () {
@@ -700,10 +678,6 @@ elements.plot.addEventListener("mouseleave", function () {
 });
 window.addEventListener("resize", function () { state.dirty = true; });
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { state.dirty = true; });
-
-if (new URLSearchParams(location.search).has("demo")) {
-    startDemo();
-}
 
 requestAnimationFrame(frame);
 </script>
