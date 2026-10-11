@@ -3,3 +3,4 @@ mx.scratch
 !.settings
 .clangd
 .DS_Store
+.venv
