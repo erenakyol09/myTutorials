@@ -247,7 +247,7 @@ def parse_arguments(argv):
     parser.add_argument("--out", type=Path, default=Path("ml/models"), help="directory for the exported model")
     parser.add_argument("--window", type=int, default=SAMPLE_RATE_HZ, help="samples per window (100 = 1 s)")
     parser.add_argument("--stride", type=int, default=20, help="samples between consecutive windows")
-    parser.add_argument("--epochs", type=int, default=60, help="training epochs")
+    parser.add_argument("--epochs", type=int, default=300, help="training epochs")
     return parser.parse_args(argv)
 
 
