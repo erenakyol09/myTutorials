@@ -54,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Application/ApplicationWrapper.cpp
     # Services
     App/Services/Adxl345.c
+    App/Services/GestureClassifier.c
     App/Services/MqttService.c
     App/Services/TemperatureSensor.c
     App/Services/TiltEstimator.c

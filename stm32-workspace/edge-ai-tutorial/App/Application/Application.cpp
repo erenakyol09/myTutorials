@@ -3,6 +3,7 @@
 #include "i2c.h"
 #include "usbd_cdc_if.h"
 
+#include <cstdarg>
 #include <cstdio>
 
 extern "C"
@@ -39,6 +40,9 @@ Application::Application()
       accelerometerReady_(false),
       lastAccelerometerRetryTick_(0U),
       tiltEstimator_(),
+      gestureClassifier_(),
+      gestureClassifierReady_(false),
+      gestureClassifierErrorSent_(false),
       samples_(),
       txBuffer_()
 {
@@ -51,6 +55,7 @@ void Application::init()
     led3_.off();
 
     tiltEstimatorCreate(&tiltEstimator_, TILT_SMOOTHING);
+    gestureClassifierReady_ = gestureClassifierInit(&gestureClassifier_);
     adxl345Create(&accelerometer_, &hi2c1, ADXL345_ADDRESS_SDO_LOW);
     accelerometerReady_ = adxl345Init(&accelerometer_);
 }
@@ -76,7 +81,9 @@ void Application::setLed(bool on)
        x,y,z,magnitude,tiltX,tiltY,tiltZ,pitch,roll
    x, y, z and magnitude are in milli-g, tiltX, tiltY and tiltZ in thousandths of full tilt,
    pitch and roll in degrees. Everything is computed here so the viewer only has to display it.
-   Lines starting with '#' are status messages. Nothing is drained while the port is busy or
+   Each time the gesture model classifies a window, a line follows the sample that completed it:
+       !gesture,name,confidence,inferenceMicros
+   with the confidence in percent. Lines starting with '#' are status messages. Nothing is drained while the port is busy or
    closed, the sensor FIFO absorbs up to 320 ms and then drops the oldest samples. */
 void Application::streamAccelerometer()
 {
@@ -85,6 +92,13 @@ void Application::streamAccelerometer()
 
     if (!usbCdcReady())
     {
+        return;
+    }
+
+    if (!gestureClassifierReady_ && !gestureClassifierErrorSent_)
+    {
+        gestureClassifierErrorSent_ = true;
+        sendLine("# Gesture model failed to start\r\n");
         return;
     }
 
@@ -114,27 +128,32 @@ void Application::streamAccelerometer()
     for (uint8_t i = 0U; i < count; i++)
     {
         TiltState tilt = {0, 0, 0, 0, 0, 0};
+        GestureResult gesture = {0U, 0U, 0U};
 
         tiltEstimatorUpdate(&tiltEstimator_, samples_[i].x, samples_[i].y, samples_[i].z, &tilt);
 
-        const int written = std::snprintf(&txBuffer_[length], sizeof(txBuffer_) - length,
-                                          "%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
-                                          static_cast<int>(samples_[i].x),
-                                          static_cast<int>(samples_[i].y),
-                                          static_cast<int>(samples_[i].z),
-                                          static_cast<int>(tilt.magnitude),
-                                          static_cast<int>(tilt.tiltX),
-                                          static_cast<int>(tilt.tiltY),
-                                          static_cast<int>(tilt.tiltZ),
-                                          static_cast<int>(tilt.pitch),
-                                          static_cast<int>(tilt.roll));
-
-        if ((written <= 0) || (static_cast<uint32_t>(written) >= (sizeof(txBuffer_) - length)))
+        if (!appendLine(length, "%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
+                        static_cast<int>(samples_[i].x),
+                        static_cast<int>(samples_[i].y),
+                        static_cast<int>(samples_[i].z),
+                        static_cast<int>(tilt.magnitude),
+                        static_cast<int>(tilt.tiltX),
+                        static_cast<int>(tilt.tiltY),
+                        static_cast<int>(tilt.tiltZ),
+                        static_cast<int>(tilt.pitch),
+                        static_cast<int>(tilt.roll)))
         {
             break;
         }
 
-        length += static_cast<uint32_t>(written);
+        if (gestureClassifierPush(&gestureClassifier_, samples_[i].x, samples_[i].y, samples_[i].z,
+                                  &gesture))
+        {
+            (void)appendLine(length, "!gesture,%s,%u,%lu\r\n",
+                             gestureClassifierLabelName(gesture.label),
+                             static_cast<unsigned int>(gesture.confidence),
+                             static_cast<unsigned long>(gesture.inferenceMicros));
+        }
     }
 
     if (length > 0U)
@@ -151,4 +170,25 @@ void Application::sendLine(const char* text)
     {
         (void)CDC_Transmit_FS(reinterpret_cast<uint8_t*>(txBuffer_), static_cast<uint16_t>(length));
     }
+}
+
+/* Formats one line at the end of the pending transmit data. Returns false and leaves the data
+   unchanged when the line does not fit. */
+bool Application::appendLine(uint32_t& length, const char* format, ...)
+{
+    const uint32_t available = sizeof(txBuffer_) - length;
+    va_list arguments;
+
+    va_start(arguments, format);
+    const int written = std::vsnprintf(&txBuffer_[length], available, format, arguments);
+    va_end(arguments);
+
+    if ((written <= 0) || (static_cast<uint32_t>(written) >= available))
+    {
+        return false;
+    }
+
+    length += static_cast<uint32_t>(written);
+
+    return true;
 }

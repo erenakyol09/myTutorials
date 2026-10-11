@@ -4,6 +4,12 @@ Reads the CSV files saved by tools/accel_viewer.html, cuts them into fixed-lengt
 windows, trains a small 1D convolutional network and exports it as a TensorFlow
 Lite model for X-CUBE-AI.
 
+Preprocessing, which the firmware must repeat exactly (see GestureClassifier.c):
+    1. divide the samples by SCALE_MILLI_G
+    2. subtract from each axis its mean over the window
+Step 2 removes gravity, so the model sees the motion and not the angle the sensor
+happened to be held at while a gesture was recorded.
+
 Each recording is a file named <label>.csv or <label>_<timestamp>.csv with the
 header x_mg,y_mg,z_mg and one sample per line at 100 Hz. Several recordings may
 share a label.
@@ -25,6 +31,11 @@ AXIS_COUNT = 3
 # The firmware must apply the same scale before running the model.
 SCALE_MILLI_G = 4000.0
 VALIDATION_FRACTION = 0.2
+# Each training window is also used this many times with its motion scaled by a
+# random factor from AMPLITUDE_RANGE, so a gesture is recognised whether it is made
+# gently or vigorously.
+AUGMENTED_COPIES = 4
+AMPLITUDE_RANGE = (0.5, 2.0)
 CSV_HEADER = "x_mg,y_mg,z_mg"
 # Suffix the viewer appends to the label when it saves a recording
 TIMESTAMP_SUFFIX = re.compile(r"_\d{8}T\d{6}$")
@@ -96,6 +107,37 @@ def make_windows(samples, window, stride):
     return np.stack([samples[start:start + window] for start in starts])
 
 
+def remove_window_mean(windows):
+    """Subtract from each axis of each window its mean over that window.
+
+    Args:
+        windows (numpy.ndarray): Windows of shape (window_count, window, 3).
+
+    Returns:
+        numpy.ndarray: Windows of the same shape whose axes each average to zero.
+    """
+    return windows - windows.mean(axis=1, keepdims=True)
+
+
+def augment_amplitude(windows, targets, copies, generator):
+    """Extend a set of windows with randomly scaled copies of themselves.
+
+    Args:
+        windows (numpy.ndarray): Mean-removed windows of shape (count, window, 3).
+        targets (numpy.ndarray): Label index of each window.
+        copies (int): Number of scaled copies to add per window.
+        generator (numpy.random.Generator): Source of the random scale factors.
+
+    Returns:
+        tuple: (windows, targets) holding the originals followed by the copies.
+    """
+    scaled = [windows]
+    for _ in range(copies):
+        factors = generator.uniform(*AMPLITUDE_RANGE, size=(len(windows), 1, 1))
+        scaled.append((windows * factors).astype(windows.dtype))
+    return np.concatenate(scaled), np.tile(targets, copies + 1)
+
+
 def build_dataset(data_dir, window, stride):
     """Load every recording and split it into training and validation windows.
 
@@ -110,8 +152,9 @@ def build_dataset(data_dir, window, stride):
 
     Returns:
         tuple: (train_x, train_y, validation_x, validation_y, labels). The x arrays
-            have shape (count, window, 3) and are scaled by SCALE_MILLI_G, the y
-            arrays hold indices into labels, a sorted list of label names.
+            have shape (count, window, 3) and are preprocessed as the module
+            docstring describes, the y arrays hold indices into labels, a sorted
+            list of label names. Only the training windows are augmented.
 
     Raises:
         ValueError: If there are no recordings, fewer than two labels, or a label
@@ -132,7 +175,7 @@ def build_dataset(data_dir, window, stride):
         split = int(len(samples) * (1.0 - VALIDATION_FRACTION))
 
         for name, chunk in (("train", samples[:split]), ("validation", samples[split:])):
-            windows = make_windows(chunk, window, stride)
+            windows = remove_window_mean(make_windows(chunk, window, stride))
             parts[name][0].append(windows)
             parts[name][1].append(np.full(len(windows), label_index, dtype=np.int64))
 
@@ -149,6 +192,9 @@ def build_dataset(data_dir, window, stride):
             if count == 0:
                 raise ValueError(f"label '{label}' has no {name} windows, record more of it")
 
+    train_x, train_y = augment_amplitude(train_x, train_y, AUGMENTED_COPIES,
+                                         np.random.default_rng(RANDOM_SEED))
+
     return train_x, train_y, validation_x, validation_y, labels
 
 
@@ -156,7 +202,7 @@ def build_model(window, class_count):
     """Create the gesture classifier.
 
     The layers are limited to ones X-CUBE-AI converts directly, and the network is
-    small enough to run in well under a millisecond on a Cortex-M7.
+    small enough to run in a couple of milliseconds on a Cortex-M7.
 
     Args:
         window (int): Number of samples per input window.

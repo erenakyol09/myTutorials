@@ -15,6 +15,8 @@ set(MX_Include_Dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/../../LWIP/Target
     ${CMAKE_CURRENT_SOURCE_DIR}/../../USB_DEVICE/App
     ${CMAKE_CURRENT_SOURCE_DIR}/../../USB_DEVICE/Target
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/ST/AI/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../X-CUBE-AI/App
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/LwIP/src/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/LwIP/system
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F7xx_HAL_Driver/Inc
@@ -60,6 +62,9 @@ set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/stm32f7xx_hal_timebase_tim.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sysmem.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/syscalls.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../X-CUBE-AI/App/network_data_params.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../X-CUBE-AI/App/network.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../X-CUBE-AI/App/network_data.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../startup_stm32f767xx.s
 )
 
@@ -201,12 +206,19 @@ set(LwIP_Src
 # Link directories setup
 set(MX_LINK_DIRS
 
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/ST/AI/Lib
 )
 # Project static libraries
 set(MX_LINK_LIBS 
+ "-Wl,--start-group" 
+	:NetworkRuntime1020_CM7_GCC.a
+ "-Wl,--end-group"
     STM32_Drivers
     ${TOOLCHAIN_LINK_LIBRARIES}
-    USB_Device_Library	FreeRTOS	LwIP	
+    USB_Device_Library
+	FreeRTOS
+	LwIP
+	
 )
 # Interface library for includes and symbols
 add_library(stm32cubemx INTERFACE)

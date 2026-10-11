@@ -7,6 +7,8 @@
 <!--
   Live viewer and recorder for the CSV stream the firmware sends over USB CDC, one line per sample:
       x,y,z,magnitude,tiltX,tiltY,tiltZ,pitch,roll
+  and one line per gesture classification:
+      !gesture,name,confidence,inferenceMicros
   This page only displays what it receives. Filtering, orientation and units are decided by the
   firmware, see Application::streamAccelerometer().
   Needs the Web Serial API: open this file in Chrome or Edge.
@@ -84,7 +86,7 @@ button.recording { background: var(--recording); border-color: var(--recording);
 #status { color: var(--text-secondary); min-width: 0; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
 .tile .label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
-.tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .value { white-space: nowrap; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tile .unit { font-size: 12px; font-weight: 400; color: var(--text-muted); margin-left: 4px; }
 .swatch { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
 .chart-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; }
@@ -146,6 +148,14 @@ button.recording { background: var(--recording); border-color: var(--recording);
             <div class="label">Sample rate</div>
             <div class="value"><span id="valueRate">--</span><span class="unit">Hz</span></div>
         </div>
+        <div class="panel tile">
+            <div class="label">Gesture</div>
+            <div class="value"><span id="valueGesture">--</span><span class="unit"><span id="valueConfidence">--</span>%</span></div>
+        </div>
+        <div class="panel tile">
+            <div class="label">Inference</div>
+            <div class="value"><span id="valueInference">--</span><span class="unit">us</span></div>
+        </div>
     </section>
 
     <section class="panel">
@@ -199,6 +209,7 @@ const MIN_RANGE_MG = 2000;
 const GRID_STEP_MG = 1000;
 const SAMPLE_FIELDS = ["x", "y", "z", "magnitude", "tiltX", "tiltY", "tiltZ", "pitch", "roll"];
 const SAMPLE_PATTERN = /^-?\d+(,-?\d+){8}$/;
+const GESTURE_PATTERN = /^!gesture,([^,]+),(\d+),(\d+)$/;
 const TILT_FULL_SCALE = 1000;
 const AXES = ["x", "y", "z"];
 
@@ -219,7 +230,10 @@ const elements = {
     magnitude: document.getElementById("valueMagnitude"),
     rate: document.getElementById("valueRate"),
     pitch: document.getElementById("valuePitch"),
-    roll: document.getElementById("valueRoll")
+    roll: document.getElementById("valueRoll"),
+    gesture: document.getElementById("valueGesture"),
+    confidence: document.getElementById("valueConfidence"),
+    inference: document.getElementById("valueInference")
 };
 
 /* Ring buffer of the most recent samples, one typed array per axis */
@@ -280,6 +294,11 @@ function handleLine(line) {
             sample[SAMPLE_FIELDS[index]] = Number(value);
         });
         pushSample(sample);
+    } else if (GESTURE_PATTERN.test(text)) {
+        const fields = GESTURE_PATTERN.exec(text);
+        elements.gesture.textContent = fields[1];
+        elements.confidence.textContent = fields[2];
+        elements.inference.textContent = fields[3];
     } else if (text.startsWith("#")) {
         elements.status.textContent = text.slice(1).trim();
     }
